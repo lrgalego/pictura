@@ -204,6 +204,9 @@ func breakdown(script string, chars []CharacterSpec) []PageSpec {
 			paras = append(paras, strings.TrimSpace(p))
 		}
 	}
+	if len(paras) == 0 {
+		paras = []string{"The story begins."}
+	}
 	n := suggestPages(script)
 	if n > 6 {
 		n = 6
