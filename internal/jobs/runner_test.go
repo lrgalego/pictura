@@ -84,9 +84,24 @@ func (e *env) wait() {
 	e.r.Wait()
 }
 
+func (e *env) mustDoneJob(what string, id int64) {
+	e.t.Helper()
+	e.wait()
+	if j, _ := e.st.Job(e.ctx, id); j == nil || j.Status != store.JobDone {
+		e.t.Fatalf("%s: job %+v", what, j)
+	}
+}
+
+// job returns the newest job on the story, story-level or per character.
 func (e *env) job() *store.Job {
-	j, _ := e.st.LatestJob(e.ctx, e.sto.ID)
-	return j
+	newest, _ := e.st.LatestJob(e.ctx, e.sto.ID)
+	perChar, _ := e.st.LatestCharacterJobs(e.ctx, e.sto.ID)
+	for _, j := range perChar {
+		if newest == nil || j.ID > newest.ID {
+			newest = j
+		}
+	}
+	return newest
 }
 
 func (e *env) chars() []*store.Character {
@@ -120,14 +135,11 @@ func TestAnalyzeThenDrawSheets(t *testing.T) {
 	if err := e.r.Analyze(e.sto.ID); err != nil {
 		t.Fatal(err)
 	}
-	if !e.r.Busy(e.sto.ID) {
-		t.Fatal("story should be busy while analyzing")
-	}
-	if err := e.r.Analyze(e.sto.ID); !errors.Is(err, ErrBusy) {
-		t.Fatalf("second job should be refused with ErrBusy, got %v", err)
+	if !e.r.Working(e.sto.ID) {
+		t.Fatal("story should be working while analyzing")
 	}
 	e.mustDone("analyze")
-	if e.r.Busy(e.sto.ID) {
+	if e.r.Busy(e.sto.ID) || e.r.Working(e.sto.ID) {
 		t.Fatal("story should be idle after the job")
 	}
 	sto, _ := e.st.Story(e.ctx, e.sto.ID)
@@ -165,8 +177,8 @@ func TestAnalyzeFailures(t *testing.T) {
 	if err := e.r.Analyze(99999); err == nil {
 		t.Fatal("a job for a missing story cannot be recorded (foreign key)")
 	}
-	if e.r.Busy(99999) {
-		t.Fatal("a refused job must not leave the story marked busy")
+	if e.r.Working(99999) {
+		t.Fatal("a refused job must not leave the story marked working")
 	}
 }
 
@@ -474,3 +486,159 @@ func TestConcurrencyLimitDefaultsToOne(t *testing.T) {
 }
 
 func removeFile(p string) error { return osRemove(p) }
+
+// blocking holds every model call until released.
+type blocking struct {
+	pipeline.AI
+	gate chan struct{}
+}
+
+func (b *blocking) ChatJSON(ctx context.Context, system, user string, images []pipeline.Image, schemaName string, schema map[string]any, out any) error {
+	<-b.gate
+	return b.AI.ChatJSON(ctx, system, user, images, schemaName, schema, out)
+}
+
+func TestQueueSchedulesByLock(t *testing.T) {
+	e := newEnv(t)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	chars := e.chars()
+	a, b, c := chars[0], chars[1], chars[2]
+	gate := make(chan struct{})
+	e.r.ai = &blocking{AI: e.ai, gate: gate}
+
+	// Two characters run side by side; a second change to A waits behind
+	// the first; a story-level job waits behind everything and blocks C.
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(e.r.Revise(e.sto.ID, a.ID, "older", false, false))
+	must(e.r.Revise(e.sto.ID, b.ID, "younger", false, false))
+	must(e.r.Revise(e.sto.ID, a.ID, "and taller", false, false))
+	must(e.r.DrawSheets(e.sto.ID))
+	must(e.r.Revise(e.sto.ID, c.ID, "later", false, false))
+
+	// Cards show the running job first: A and B are running (A also has a
+	// queued change behind it), C waits behind the story job.
+	perChar, _ := e.st.LatestCharacterJobs(e.ctx, e.sto.ID)
+	if !perChar[a.ID].Running() || !perChar[b.ID].Running() || !perChar[c.ID].Queued() {
+		t.Fatalf("a running, b running, c queued behind the story job: %+v", perChar)
+	}
+	if !e.r.CharacterBusy(e.sto.ID, a.ID) {
+		t.Fatal("A has work queued")
+	}
+	if j, _ := e.st.LatestJob(e.ctx, e.sto.ID); !j.Queued() {
+		t.Fatalf("story job should be queued: %+v", j)
+	}
+	if e.r.Busy(e.sto.ID) || !e.r.Working(e.sto.ID) || !e.r.CharacterBusy(e.sto.ID, a.ID) || !e.r.CharacterBusy(e.sto.ID, c.ID) {
+		t.Fatal("lock state: story not running but working; a and c busy")
+	}
+	if running, _ := e.st.AnyRunning(e.ctx, e.sto.ID); !running {
+		t.Fatal("queued work counts as running for the UI")
+	}
+	close(gate)
+	e.r.Wait()
+	if e.r.Working(e.sto.ID) || e.r.CharacterBusy(e.sto.ID, a.ID) {
+		t.Fatal("everything should be released")
+	}
+	// The fake rewrites the wardrobe on every revision, so the last queued
+	// change is the one that shows (ordering was asserted above).
+	got, _ := e.st.Character(e.ctx, a.ID)
+	if !strings.Contains(got.Wardrobe, "revised: and taller") {
+		t.Fatalf("the second change to A ran after the first: %+v", got)
+	}
+	got, _ = e.st.Character(e.ctx, c.ID)
+	if !strings.Contains(got.Wardrobe, "revised: later") {
+		t.Fatalf("C's change ran after the story job: %+v", got)
+	}
+	if !AllReady(e.chars()) {
+		t.Fatal("the queued story job drew every sheet")
+	}
+	jobs, _ := e.st.LatestCharacterJobs(e.ctx, e.sto.ID)
+	for id, j := range jobs {
+		if j.Status != store.JobDone {
+			t.Fatalf("character %d job: %+v", id, j)
+		}
+	}
+}
+
+func TestQueuedEditsKeepTheirOrder(t *testing.T) {
+	e := newEnv(t)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	a := e.chars()[0]
+	gate := make(chan struct{})
+	e.r.ai = &blocking{AI: e.ai, gate: gate}
+	// A revision is running; a hand edit queued behind it must win.
+	if err := e.r.Revise(e.sto.ID, a.ID, "older", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.r.Edit(e.sto.ID, a.ID, Fields{Name: "Mara Quinn", Visual: "hand-written", Wardrobe: "cape", Redraw: true}); err != nil {
+		t.Fatal(err)
+	}
+	close(gate)
+	e.r.Wait()
+	got, _ := e.st.Character(e.ctx, a.ID)
+	if got.Name != "Mara Quinn" || got.Visual != "hand-written" || got.Wardrobe != "cape" || got.SheetStatus != store.ImagePending {
+		t.Fatalf("the edit should be applied last and draw nothing in the casting phase: %+v", got)
+	}
+	// With a sheet in place, an edit that changes the look redraws.
+	_ = e.r.DrawSheets(e.sto.ID)
+	e.mustDone("draw")
+	before, _ := e.st.Character(e.ctx, a.ID)
+	_ = e.r.Edit(e.sto.ID, a.ID, Fields{Name: "Mara Quinn", Visual: "hand-written again", Wardrobe: "cape", Redraw: true})
+	e.r.Wait()
+	after, _ := e.st.Character(e.ctx, a.ID)
+	if after.SheetImage == before.SheetImage || after.SheetStatus != store.ImageReady {
+		t.Fatal("look change with redraw should produce a new sheet")
+	}
+	_ = e.r.Edit(e.sto.ID, a.ID, Fields{Name: "Mara Quinn", Visual: "hand-written again", Wardrobe: "cape", Personality: "wry", Redraw: true})
+	e.r.Wait()
+	same, _ := e.st.Character(e.ctx, a.ID)
+	if same.SheetImage != after.SheetImage || same.Personality != "wry" {
+		t.Fatal("a words-only edit keeps the sheet")
+	}
+	_ = e.r.Edit(e.sto.ID, 4242, Fields{Name: "x"})
+	e.mustFail("edit missing", "not found")
+}
+
+func TestLinkAndSetSheetAreQueued(t *testing.T) {
+	e := newEnv(t)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	u, _ := e.st.UserByUsername(e.ctx, "w")
+	other, _ := e.st.CreateStory(e.ctx, u.ID, "Other", script, "noir")
+	src := &store.Character{StoryID: other.ID, Name: "Mara", Visual: "from elsewhere"}
+	_ = e.st.InsertCharacter(e.ctx, src)
+	name, _ := e.st.SaveImage(e.ctx, other.ID, "png", tinyPNG())
+	_ = e.st.SetCharacterSheet(e.ctx, src.ID, name, store.ImageReady, "")
+	a := e.chars()[0]
+	if err := e.r.Link(e.sto.ID, a.ID, src.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.r.Wait()
+	got, _ := e.st.Character(e.ctx, a.ID)
+	if got.Visual != "from elsewhere" || got.SheetStatus != store.ImageReady || got.OriginID != src.ID {
+		t.Fatalf("link: %+v", got)
+	}
+	_ = e.r.Link(e.sto.ID, a.ID, 4242)
+	e.mustFail("link missing source", "not found")
+	_ = e.r.Link(e.sto.ID, 4242, src.ID)
+	e.mustFail("link missing target", "not found")
+
+	b := e.chars()[1]
+	sheet, _ := e.st.SaveImage(e.ctx, e.sto.ID, "png", tinyPNG())
+	if err := e.r.SetSheet(e.sto.ID, b.ID, sheet); err != nil {
+		t.Fatal(err)
+	}
+	e.r.Wait()
+	got, _ = e.st.Character(e.ctx, b.ID)
+	if got.SheetImage != sheet || got.SheetStatus != store.ImageReady || !strings.Contains(got.Visual, "matched to 1 reference image") {
+		t.Fatalf("set sheet: %+v", got)
+	}
+	_ = e.r.SetSheet(e.sto.ID, 4242, sheet)
+	e.mustFail("set sheet missing", "not found")
+}

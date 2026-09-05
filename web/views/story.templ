@@ -245,11 +245,15 @@ templ stepItem(st *store.Story, n int, label string, current int) {
 // ---------- jobs ----------
 
 templ JobBar(j *store.Job) {
-	if j.Running() {
+	if j.Active() {
 		<div class="panel panel--soft job" role="status">
 			<div class="job__row">
 				@components.Spinner("", "")
-				<span class="job__title">{ j.Message }</span>
+				if j.Queued() {
+					<span class="job__title">{ "Waiting its turn: " + j.Message }</span>
+				} else {
+					<span class="job__title">{ j.Message }</span>
+				}
 				<span class="job__time">{ jobs.Elapsed(j).String() }</span>
 			</div>
 			if j.Total > 0 {
@@ -330,7 +334,9 @@ func orPlaceholder(p string) string {
 type CharactersView struct {
 	Story      *store.Story
 	Characters []*store.Character
-	Job        *store.Job
+	Job        *store.Job            // latest story-level job (read, draw all, adjust cast)
+	CharJobs   map[int64]*store.Job  // latest job per character (adjust, redraw, references, sheet)
+	Working    bool                  // anything is running: keep polling
 	Refs        []*store.Ref
 	PageCount   int
 	AllReady    bool                          // every sheet is drawn: storyboarding may start
@@ -343,14 +349,14 @@ templ CharactersStep(v CharactersView) {
 }
 
 templ CharactersPanel(v CharactersView) {
-	@stepPanel(base(v.Story)+"/characters/panel", v.Job.Running()) {
+	@stepPanel(base(v.Story)+"/characters/panel", v.Working) {
 		if v.Job != nil {
 			@JobBar(v.Job)
 		}
-		if len(v.Characters) == 0 && v.Job.Running() {
+		if len(v.Characters) == 0 && v.Job.Active() {
 			@skeletonCast()
 		}
-		if len(v.Characters) == 0 && !v.Job.Running() {
+		if len(v.Characters) == 0 && !v.Job.Active() {
 			<div class="empty-wrap">
 				@components.EmptyState(components.EmptyStateProps{Title: "No cast yet", Description: "The editor could not find characters. Check the script and try again."}) {
 					@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/script"}) {
@@ -362,7 +368,7 @@ templ CharactersPanel(v CharactersView) {
 			@castToolbar(v, false)
 			<div class="cast">
 				for _, c := range v.Characters {
-					@characterCard(v.Story, c, refsFor(v.Refs, c.ID), v.Job.Running(), v.Suggestions[c.ID], v.Lineage[c.ID])
+					@characterCard(v.Story, c, refsFor(v.Refs, c.ID), false, v.CharJobs[c.ID], v.Suggestions[c.ID], v.Lineage[c.ID])
 				}
 			</div>
 			@castToolbar(v, true)
@@ -380,13 +386,13 @@ templ castToolbar(v CharactersView, bottom bool) {
 			}
 		}
 		<span class="toolbar__spacer"></span>
-		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/characters/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Running()}}) {
+		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/characters/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Active()}}) {
 			@components.IconPencil()
 			Adjust the cast
 		}
 		if v.AllReady {
 			<form hx-post={ base(v.Story) + "/characters/approve" } hx-target="#step-panel" hx-swap="outerHTML">
-				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Running()}) {
+				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
 					if v.PageCount > 0 {
 						Storyboard again
 					} else {
@@ -396,7 +402,7 @@ templ castToolbar(v CharactersView, bottom bool) {
 				}
 			</form>
 		} else {
-			@components.Button(components.ButtonProps{Disabled: v.Job.Running(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/characters/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+			@components.Button(components.ButtonProps{Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/characters/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
 				@components.IconPalette()
 				if readySheets(v.Characters) > 0 {
 					Draw the remaining sheets
@@ -408,10 +414,23 @@ templ castToolbar(v CharactersView, bottom bool) {
 	</div>
 }
 
-templ characterCard(st *store.Story, c *store.Character, refs []*store.Ref, busy bool, matches []store.LibraryEntry, alsoIn []*store.Story) {
-	<article class="panel char" id={ fmt.Sprintf("char-%d", c.ID) }>
+templ characterCard(st *store.Story, c *store.Character, refs []*store.Ref, busy bool, job *store.Job, matches []store.LibraryEntry, alsoIn []*store.Story) {
+	<article class={ "panel char", templ.KV("char--working", job.Active()) } id={ fmt.Sprintf("char-%d", c.ID) }>
 		<div class={ "char__sheet", templ.KV("char__sheet--idle", c.SheetStatus == store.ImagePending) }>
-			if c.SheetStatus == store.ImagePending {
+			if job.Active() {
+				<div class="char__state char__state--busy">
+					<div>
+						@components.Spinner("lg", "")
+						if job.Queued() {
+							<div class="char__state-msg">Waiting its turn</div>
+							<div class="note">{ job.Message }</div>
+						} else {
+							<div class="char__state-msg">{ job.Message }</div>
+							<div class="note">Other characters stay editable. More changes queue up behind this one.</div>
+						}
+					</div>
+				</div>
+			} else if c.SheetStatus == store.ImagePending {
 				<div class="char__state char__state--idle">
 					<span class="char__initial">{ initials(c.Name) }</span>
 					<span class="char__state-msg">Sheet not drawn yet</span>
@@ -422,6 +441,13 @@ templ characterCard(st *store.Story, c *store.Character, refs []*store.Ref, busy
 		</div>
 		if len(matches) > 0 && !busy {
 			@suggestionBox(st, c, matches)
+		}
+		if job != nil && job.Status == store.JobError {
+			<div class="char__failed">
+				@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "The last change to " + c.Name + " failed"}) {
+					{ job.Error }
+				}
+			</div>
 		}
 		@characterBody(st, c, refs, busy, c.SheetStatus != store.ImagePending, alsoIn)
 	</article>
@@ -740,11 +766,11 @@ templ PagesStep(v PagesView) {
 }
 
 templ PagesPanel(v PagesView) {
-	@stepPanel(base(v.Story)+"/pages/panel", v.Job.Running()) {
+	@stepPanel(base(v.Story)+"/pages/panel", v.Job.Active()) {
 		if v.Job != nil {
 			@JobBar(v.Job)
 		}
-		if len(v.Pages) == 0 && !v.Job.Running() {
+		if len(v.Pages) == 0 && !v.Job.Active() {
 			<div class="empty-wrap">
 				@components.EmptyState(components.EmptyStateProps{Title: "No pages yet", Description: "The storyboard has not been made. Start it from the cast."}) {
 					@components.Button(components.ButtonProps{Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
@@ -756,7 +782,7 @@ templ PagesPanel(v PagesView) {
 			@pagesToolbar(v, false)
 			<div class="pages">
 				for _, p := range v.Pages {
-					@pageCard(v.Story, p, v.Job.Running())
+					@pageCard(v.Story, p, v.Job.Active())
 				}
 			</div>
 			@pagesToolbar(v, true)
@@ -770,16 +796,16 @@ templ pagesToolbar(v PagesView, bottom bool) {
 			<span class="note">{ plural(len(v.Pages), "page", "pages") + ", " + plural(panelCount(v.Pages), "panel", "panels") + ". Read the plan, ask for changes, then draw." }</span>
 		}
 		<span class="toolbar__spacer"></span>
-		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Running(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
 			@components.IconRefreshCw()
 			Start over
 		}
-		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/pages/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Running()}}) {
+		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/pages/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Active()}}) {
 			@components.IconPencil()
 			Adjust all pages
 		}
 		<form hx-post={ base(v.Story) + "/pages/approve" } hx-target="#step-panel" hx-swap="outerHTML">
-			@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Running()}) {
+			@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
 				if readyCount(v.Pages) > 0 {
 					Draw the changed pages
 				} else {
@@ -859,7 +885,7 @@ templ BookStep(v PagesView) {
 }
 
 templ BookPanel(v PagesView) {
-	@stepPanel(base(v.Story)+"/book/panel", v.Job.Running()) {
+	@stepPanel(base(v.Story)+"/book/panel", v.Job.Active()) {
 		if v.Job != nil {
 			@JobBar(v.Job)
 		}
@@ -875,7 +901,7 @@ templ BookPanel(v PagesView) {
 		} else {
 			<div class="book-grid">
 				for _, p := range v.Pages {
-					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Running())
+					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Active())
 				}
 			</div>
 			<div class="toolbar toolbar--bottom">
@@ -893,7 +919,7 @@ templ bookToolbar(v PagesView) {
 	<div class="toolbar">
 		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
 		<span class="toolbar__spacer"></span>
-		if readyCount(v.Pages) < len(v.Pages) && !v.Job.Running() {
+		if readyCount(v.Pages) < len(v.Pages) && !v.Job.Active() {
 			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": base(v.Story) + "/book/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
 				@components.IconRefreshCw()
 				Draw the missing pages

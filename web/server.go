@@ -5,7 +5,6 @@ package web
 import (
 	"context"
 	"embed"
-	"errors"
 	"io/fs"
 	"log"
 	"net/http"
@@ -199,11 +198,7 @@ func toast(variant components.ToastVariant, title, desc string) templ.Component 
 }
 
 func errorToast(err error) templ.Component {
-	msg := err.Error()
-	if errors.Is(err, jobs.ErrBusy) {
-		return toast(components.ToastDefault, "Still working", "Wait for the current step to finish, then try again.")
-	}
-	return toast(components.ToastDestructive, "That didn't work", msg)
+	return toast(components.ToastDestructive, "That didn't work", err.Error())
 }
 
 func render(w http.ResponseWriter, r *http.Request, c templ.Component) {

@@ -228,8 +228,16 @@ func (s *server) charactersView(r *http.Request, st *store.Story) (views.Charact
 	if err != nil {
 		return views.CharactersView{}, err
 	}
+	charJobs, err := s.st.LatestCharacterJobs(r.Context(), st.ID)
+	if err != nil {
+		return views.CharactersView{}, err
+	}
+	working, err := s.st.AnyRunning(r.Context(), st.ID)
+	if err != nil {
+		return views.CharactersView{}, err
+	}
 	return views.CharactersView{
-		Story: st, Characters: chars, Job: job, Refs: refs, PageCount: len(pages),
+		Story: st, Characters: chars, Job: job, CharJobs: charJobs, Working: working, Refs: refs, PageCount: len(pages),
 		AllReady:    jobs.AllReady(chars),
 		Suggestions: suggestions(lib, chars, st.ID),
 		Lineage:     lineage(lib, chars, st.ID),
@@ -366,10 +374,6 @@ func (s *server) characterAdjust(w http.ResponseWriter, r *http.Request) {
 		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.FeedbackField("", "", "Say what should change, or attach reference images.", true))
 		return
 	}
-	if s.jobs.Busy(st.ID) {
-		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(jobs.ErrBusy))
-		return
-	}
 	if err := s.saveRefs(r, st.ID, c.ID, files, fb); err != nil {
 		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.FeedbackField(fb, "", err.Error(), true))
 		return
@@ -423,33 +427,32 @@ func (s *server) characterEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.jobs.Busy(st.ID) {
-		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(fmt.Errorf("the story is still being worked on")))
+	f := jobs.Fields{
+		Name: field(r, "name"), Role: field(r, "role"), Age: field(r, "age"),
+		Visual: field(r, "visual"), Wardrobe: field(r, "wardrobe"), Items: field(r, "items"), Personality: field(r, "personality"),
+		Redraw: r.FormValue("redraw") != "",
+	}
+	if f.Name == "" || f.Visual == "" {
+		draft := *c
+		draft.Name, draft.Role, draft.Age, draft.Visual, draft.Wardrobe, draft.Items, draft.Personality = f.Name, f.Role, f.Age, f.Visual, f.Wardrobe, f.Items, f.Personality
+		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.CharacterEditFields(&draft, "A name and an appearance are required.", true))
 		return
 	}
-	before := *c
-	c.Name, c.Role, c.Age = field(r, "name"), field(r, "role"), field(r, "age")
-	c.Visual, c.Wardrobe, c.Items, c.Personality = field(r, "visual"), field(r, "wardrobe"), field(r, "items"), field(r, "personality")
-	if c.Name == "" || c.Visual == "" {
-		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.CharacterEditFields(c, "A name and an appearance are required.", true))
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
+	if err := s.jobs.Edit(st.ID, c.ID, f); err != nil {
+		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(err))
 		return
 	}
-	if err := s.st.UpdateCharacter(r.Context(), c); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	looksChanged := before.Visual != c.Visual || before.Wardrobe != c.Wardrobe || before.Items != c.Items || before.Age != c.Age
-	if looksChanged && r.FormValue("redraw") != "" && before.SheetStatus != store.ImagePending {
-		if err := s.jobs.Revise(st.ID, c.ID, "", false, true); err != nil {
-			s.answerCharacters(w, r, st, views.CloseModal(), errorToast(err))
-			return
-		}
-		s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, "Saved "+c.Name, "Redrawing the sheet with the new details."))
-		return
-	}
-	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, "Saved "+c.Name, ""))
+	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, "Saving "+f.Name, queuedNote(queued, "The sheet is redrawn if the look changed.")))
 }
 
+// queuedNote words a toast for work that had to wait its turn.
+func queuedNote(queued bool, otherwise string) string {
+	if queued {
+		return "Queued behind the change already running on this character."
+	}
+	return otherwise
+}
 func (s *server) ref(w http.ResponseWriter, r *http.Request, st *store.Story) (*store.Ref, bool) {
 	rid, _ := strconv.ParseInt(r.PathValue("rid"), 10, 64)
 	ref, err := s.st.Ref(r.Context(), rid)
@@ -499,10 +502,6 @@ func (s *server) characterSheet(w http.ResponseWriter, r *http.Request) {
 		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "No sheet uploaded", err.Error()))
 		return
 	}
-	if s.jobs.Busy(st.ID) {
-		s.answerCharacters(w, r, st, errorToast(jobs.ErrBusy))
-		return
-	}
 	f, err := files[0].Open()
 	if err != nil {
 		s.fail(w, r, err)
@@ -524,16 +523,12 @@ func (s *server) characterSheet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.st.SetCharacterSheet(r.Context(), c.ID, name, store.ImageReady, ""); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	_ = s.st.Touch(r.Context(), st.ID)
-	if err := s.jobs.AdoptSheet(st.ID, c.ID); err != nil {
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
+	if err := s.jobs.SetSheet(st.ID, c.ID, name); err != nil {
 		s.answerCharacters(w, r, st, errorToast(err))
 		return
 	}
-	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Sheet set for "+c.Name, "Your image is the character sheet now. The editor is updating the description to match it."))
+	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Sheet set for "+c.Name, queuedNote(queued, "Your image is the character sheet now. The editor is updating the description to match it.")))
 }
 
 // ---------- cast registry ----------
@@ -685,20 +680,16 @@ func (s *server) characterLink(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r)
 		return
 	}
-	if s.jobs.Busy(st.ID) {
-		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(jobs.ErrBusy))
-		return
-	}
-	if err := s.st.LinkCharacter(r.Context(), c, src); err != nil {
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
+	if err := s.jobs.Link(st.ID, c.ID, src.ID); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	_ = s.st.Touch(r.Context(), st.ID)
 	desc := "Look, references and sheet copied from " + titleOr(srcStory) + "."
 	if src.SheetStatus != store.ImageReady {
 		desc = "Look and references copied from " + titleOr(srcStory) + "; the sheet still needs drawing."
 	}
-	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, c.Name+" is now the same character", desc))
+	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, c.Name+" is now the same character", queuedNote(queued, desc)))
 }
 
 func titleOr(st *store.Story) string {
@@ -741,10 +732,7 @@ func (s *server) characterRefs(w http.ResponseWriter, r *http.Request) {
 		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "Nothing attached", err.Error()))
 		return
 	}
-	if s.jobs.Busy(st.ID) {
-		s.answerCharacters(w, r, st, errorToast(jobs.ErrBusy))
-		return
-	}
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.saveRefs(r, st.ID, c.ID, files, field(r, "note")); err != nil {
 		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "Nothing attached", err.Error()))
 		return
@@ -758,7 +746,7 @@ func (s *server) characterRefs(w http.ResponseWriter, r *http.Request) {
 	if art {
 		desc = "Description revised and sheet redrawn to match."
 	}
-	s.answerCharacters(w, r, st, toast(components.ToastSuccess, fmt.Sprintf("%s attached to %s", plural(len(files), "image", "images"), c.Name), desc))
+	s.answerCharacters(w, r, st, toast(components.ToastSuccess, fmt.Sprintf("%s attached to %s", plural(len(files), "image", "images"), c.Name), queuedNote(queued, desc)))
 }
 
 func (s *server) characterView(w http.ResponseWriter, r *http.Request) {

@@ -434,3 +434,5 @@ h1, h2, h3, .display {
   .suggest__row { flex-wrap: wrap; }
   .suggest__row form { width: 100%; }
 }
+.char__failed { padding: 0.75rem 0.9rem 0; }
+.char--working { outline: 3px solid var(--primary); outline-offset: 3px; }

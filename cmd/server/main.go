@@ -53,7 +53,11 @@ func main() {
 		if key == "" {
 			log.Printf("META_API_KEY is not set — running with the offline fake model provider (placeholder art)")
 		}
-		ai = &pipeline.Fake{Delay: 1500 * time.Millisecond}
+		delay := 1500 * time.Millisecond
+		if d, err := time.ParseDuration(os.Getenv("FAKE_DELAY")); err == nil {
+			delay = d
+		}
+		ai = &pipeline.Fake{Delay: delay}
 	default:
 		c := meta.New(key)
 		if m := os.Getenv("META_TEXT_MODEL"); m != "" {

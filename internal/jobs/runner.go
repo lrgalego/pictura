@@ -4,7 +4,6 @@ package jobs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -15,17 +14,29 @@ import (
 	"github.com/lrgalego/story-time/internal/store"
 )
 
-// ErrBusy is returned when a story already has a job running.
-var ErrBusy = errors.New("this story is already working on something — wait for it to finish")
-
-// Runner owns the goroutines and the concurrency limits.
+// Runner is a per-story scheduler. Nothing is ever refused: work is queued
+// and runs as soon as its locks are free. A character job needs its
+// character free and no story-level job running; a story-level job (read
+// the script, draw every sheet, adjust the cast, storyboard, render) waits
+// for everything on the story and, once at the head of the queue, stops
+// later character jobs from starting so it cannot be starved.
 type Runner struct {
-	st     *store.Store
-	ai     pipeline.AI
-	mu     sync.Mutex
-	active map[int64]bool
-	imgSem chan struct{}
-	wg     sync.WaitGroup
+	st           *store.Store
+	ai           pipeline.AI
+	mu           sync.Mutex
+	queues       map[int64][]*task // per story, in submission order
+	storyRunning map[int64]bool
+	charRunning  map[int64]bool
+	charCount    map[int64]int // running character jobs per story
+	imgSem       chan struct{}
+	wg           sync.WaitGroup
+}
+
+type task struct {
+	job    *store.Job
+	kind   string
+	charID int64
+	fn     func(ctx context.Context, report reporter) error
 }
 
 // New creates a runner; images limits concurrent image generations.
@@ -33,59 +44,141 @@ func New(st *store.Store, ai pipeline.AI, images int) *Runner {
 	if images < 1 {
 		images = 1
 	}
-	return &Runner{st: st, ai: ai, active: map[int64]bool{}, imgSem: make(chan struct{}, images)}
+	return &Runner{st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, imgSem: make(chan struct{}, images)}
 }
 
-// Wait blocks until every running job has finished (tests, shutdown).
-func (r *Runner) Wait() { r.wg.Wait() }
+// Wait blocks until every queued and running job has finished (tests, shutdown).
+func (r *Runner) Wait() {
+	for {
+		r.wg.Wait()
+		r.mu.Lock()
+		idle := true
+		for _, q := range r.queues {
+			if len(q) > 0 {
+				idle = false
+			}
+		}
+		r.mu.Unlock()
+		if idle {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
-// Busy reports whether a story has a job in flight.
+// Busy reports whether a story-level job is running.
 func (r *Runner) Busy(storyID int64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.active[storyID]
+	return r.storyRunning[storyID]
+}
+
+// Working reports whether anything is queued or running for a story.
+func (r *Runner) Working(storyID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.storyRunning[storyID] || r.charCount[storyID] > 0 || len(r.queues[storyID]) > 0
+}
+
+// CharacterBusy reports whether a character has work running or queued.
+func (r *Runner) CharacterBusy(storyID, charID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.storyRunning[storyID] || r.charRunning[charID] {
+		return true
+	}
+	for _, t := range r.queues[storyID] {
+		if t.charID == charID {
+			return true
+		}
+	}
+	return false
 }
 
 type reporter func(progress, total int, message string)
 
+// start queues a story-level job.
 func (r *Runner) start(storyID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
-	r.mu.Lock()
-	if r.active[storyID] {
-		r.mu.Unlock()
-		return ErrBusy
-	}
-	r.active[storyID] = true
-	r.mu.Unlock()
+	return r.enqueue(storyID, 0, kind, message, total, fn)
+}
 
-	ctx := context.Background()
-	job, err := r.st.CreateJob(ctx, storyID, kind, message, total)
+// startChar queues a character-level job.
+func (r *Runner) startChar(storyID, charID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
+	return r.enqueue(storyID, charID, kind, message, total, fn)
+}
+
+func (r *Runner) enqueue(storyID, charID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
+	job, err := r.st.CreateJob(context.Background(), storyID, charID, kind, message, total)
 	if err != nil {
-		r.release(storyID)
 		return err
 	}
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		defer r.release(storyID)
-		report := func(progress, total int, message string) {
-			_ = r.st.UpdateJob(ctx, job.ID, progress, total, message)
-		}
-		err := fn(ctx, report)
-		msg := ""
-		if err != nil {
-			msg = err.Error()
-			log.Printf("job %d (%s) story %d failed: %v", job.ID, kind, storyID, err)
-		}
-		_ = r.st.FinishJob(ctx, job.ID, msg)
-		_ = r.st.Touch(ctx, storyID)
-	}()
+	r.mu.Lock()
+	r.queues[storyID] = append(r.queues[storyID], &task{job: job, kind: kind, charID: charID, fn: fn})
+	r.mu.Unlock()
+	r.pump(storyID)
 	return nil
 }
 
-func (r *Runner) release(storyID int64) {
+// pump starts every queued task whose locks are free.
+func (r *Runner) pump(storyID int64) {
 	r.mu.Lock()
-	delete(r.active, storyID)
+	defer r.mu.Unlock()
+	q := r.queues[storyID]
+	for i := 0; i < len(q); {
+		t := q[i]
+		if t.charID == 0 {
+			if r.storyRunning[storyID] || r.charCount[storyID] > 0 {
+				break // wait for the story to quiesce; nothing behind it may start
+			}
+			r.storyRunning[storyID] = true
+		} else {
+			if r.storyRunning[storyID] {
+				break
+			}
+			if r.charRunning[t.charID] {
+				i++ // this character is busy; later tasks on other characters may go
+				continue
+			}
+			r.charRunning[t.charID] = true
+			r.charCount[storyID]++
+		}
+		q = append(q[:i], q[i+1:]...)
+		r.queues[storyID] = q
+		r.wg.Add(1)
+		go r.execute(storyID, t)
+	}
+	if len(q) == 0 {
+		delete(r.queues, storyID)
+	}
+}
+
+func (r *Runner) execute(storyID int64, t *task) {
+	defer r.wg.Done()
+	ctx := context.Background()
+	_ = r.st.StartJob(ctx, t.job.ID)
+	report := func(progress, total int, message string) {
+		_ = r.st.UpdateJob(ctx, t.job.ID, progress, total, message)
+	}
+	err := t.fn(ctx, report)
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		log.Printf("job %d (%s) story %d failed: %v", t.job.ID, t.kind, storyID, err)
+	}
+	_ = r.st.FinishJob(ctx, t.job.ID, msg)
+	_ = r.st.Touch(ctx, storyID)
+
+	r.mu.Lock()
+	if t.charID == 0 {
+		delete(r.storyRunning, storyID)
+	} else {
+		delete(r.charRunning, t.charID)
+		if r.charCount[storyID]--; r.charCount[storyID] <= 0 {
+			delete(r.charCount, storyID)
+		}
+	}
 	r.mu.Unlock()
+	r.pump(storyID)
 }
 
 // ---------- step 2: characters ----------
@@ -289,7 +382,7 @@ func (r *Runner) Revise(storyID, charID int64, feedback string, revise, draw boo
 	if draw {
 		total = 1
 	}
-	return r.start(storyID, "sheet", msg, total, func(ctx context.Context, report reporter) error {
+	return r.startChar(storyID, charID, "sheet", msg, total, func(ctx context.Context, report reporter) error {
 		story, err := r.st.Story(ctx, storyID)
 		if err != nil {
 			return err
@@ -324,7 +417,13 @@ func (r *Runner) Revise(storyID, charID int64, feedback string, revise, draw boo
 // AdoptSheet rewrites a character's description from a finished sheet the
 // writer uploaded, so the words match the art that will drive the pages.
 func (r *Runner) AdoptSheet(storyID, charID int64) error {
-	return r.start(storyID, "sheet", "Reading the uploaded sheet…", 0, func(ctx context.Context, report reporter) error {
+	return r.startChar(storyID, charID, "adopt", "Reading the uploaded sheet…", 0, func(ctx context.Context, report reporter) error {
+		return r.adopt(ctx, storyID, charID)
+	})
+}
+
+func (r *Runner) adopt(ctx context.Context, storyID, charID int64) error {
+	{
 		story, err := r.st.Story(ctx, storyID)
 		if err != nil {
 			return err
@@ -352,6 +451,73 @@ func (r *Runner) AdoptSheet(storyID, charID int64) error {
 		}
 		r.invalidatePages(ctx, storyID)
 		return nil
+	}
+}
+
+// Fields is what the edit dialog can change.
+type Fields struct {
+	Name, Role, Age, Visual, Wardrobe, Items, Personality string
+	Redraw                                                bool // redraw the sheet if the look changed and one exists
+}
+
+// Edit applies hand-written fields, queued behind any running change to
+// the same character so a revision in flight cannot overwrite them.
+func (r *Runner) Edit(storyID, charID int64, f Fields) error {
+	return r.startChar(storyID, charID, "edit", "Saving your edits…", 0, func(ctx context.Context, report reporter) error {
+		story, err := r.st.Story(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		c, err := r.st.Character(ctx, charID)
+		if err != nil || c.StoryID != storyID {
+			return store.ErrNotFound
+		}
+		looksChanged := c.Visual != f.Visual || c.Wardrobe != f.Wardrobe || c.Items != f.Items || c.Age != f.Age
+		hadSheet := c.SheetStatus != store.ImagePending
+		c.Name, c.Role, c.Age, c.Visual, c.Wardrobe, c.Items, c.Personality = f.Name, f.Role, f.Age, f.Visual, f.Wardrobe, f.Items, f.Personality
+		if err := r.st.UpdateCharacter(ctx, c); err != nil {
+			return err
+		}
+		if !(looksChanged && f.Redraw && hadSheet) {
+			return nil
+		}
+		report(0, 1, "Redrawing the sheet with the new details…")
+		r.invalidatePages(ctx, storyID)
+		return r.drawSheet(ctx, story, c)
+	})
+}
+
+// Link makes a character the same as one from another story (queued).
+func (r *Runner) Link(storyID, charID, sourceID int64) error {
+	return r.startChar(storyID, charID, "link", "Copying the character…", 0, func(ctx context.Context, report reporter) error {
+		c, err := r.st.Character(ctx, charID)
+		if err != nil || c.StoryID != storyID {
+			return store.ErrNotFound
+		}
+		src, err := r.st.Character(ctx, sourceID)
+		if err != nil {
+			return store.ErrNotFound
+		}
+		if err := r.st.LinkCharacter(ctx, c, src); err != nil {
+			return err
+		}
+		r.invalidatePages(ctx, storyID)
+		return nil
+	})
+}
+
+// SetSheet installs an uploaded image (already stored under imageName) as
+// the character's finished sheet, then describes the character from it.
+func (r *Runner) SetSheet(storyID, charID int64, imageName string) error {
+	return r.startChar(storyID, charID, "adopt", "Reading the uploaded sheet…", 0, func(ctx context.Context, report reporter) error {
+		c, err := r.st.Character(ctx, charID)
+		if err != nil || c.StoryID != storyID {
+			return store.ErrNotFound
+		}
+		if err := r.st.SetCharacterSheet(ctx, c.ID, imageName, store.ImageReady, ""); err != nil {
+			return err
+		}
+		return r.adopt(ctx, storyID, charID)
 	})
 }
 

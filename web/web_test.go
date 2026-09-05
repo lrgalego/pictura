@@ -538,9 +538,10 @@ func TestCastRegistry(t *testing.T) {
 
 	// Link B's Mara to A's Mara: sheet copied, lineage shown, suggestion gone.
 	resp, body = e.post(b+"/characters/"+maraB+"/link", url.Values{"source": {maraA}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "is now the same character") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "is now the same character") || !strings.Contains(body, "Copying the character") {
 		t.Fatalf("link: %d %s", resp.StatusCode, body)
 	}
+	e.waitIdle()
 	_, body = e.get(b + "/characters")
 	if strings.Count(body, `character sheet"`) != 1 || !strings.Contains(body, "Also in") || !strings.Contains(body, "Book One") {
 		t.Fatalf("linked character should carry the copied sheet and lineage:\n%s", body)

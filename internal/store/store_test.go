@@ -281,12 +281,18 @@ func TestJobs(t *testing.T) {
 	if j, err := s.LatestJob(ctx, st.ID); err != nil || j != nil {
 		t.Fatalf("no jobs yet: %v %v", j, err)
 	}
-	j, err := s.CreateJob(ctx, st.ID, "analyze", "Reading…", 0)
+	j, err := s.CreateJob(ctx, st.ID, 0, "analyze", "Reading…", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !j.Running() {
-		t.Fatal("new job should be running")
+	if !j.Queued() || j.Running() || !j.Active() {
+		t.Fatal("new job should be queued")
+	}
+	if err := s.StartJob(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Job(ctx, j.ID); !got.Running() || !got.Active() {
+		t.Fatal("started job should be running")
 	}
 	if err := s.UpdateJob(ctx, j.ID, 2, 3, "Drawing"); err != nil {
 		t.Fatal(err)
@@ -299,16 +305,19 @@ func TestJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ = s.LatestJob(ctx, st.ID)
-	if got.Status != JobError || got.Error != "boom" || got.Running() {
+	if got.Status != JobError || got.Error != "boom" || got.Active() {
 		t.Fatalf("finish with error: %+v", got)
 	}
-	j2, _ := s.CreateJob(ctx, st.ID, "render", "", 1)
+	j2, _ := s.CreateJob(ctx, st.ID, 0, "render", "", 1)
+	j3, _ := s.CreateJob(ctx, st.ID, 0, "render", "", 1)
+	_ = s.StartJob(ctx, j3.ID)
 	if err := s.FailRunningJobs(ctx); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.Job(ctx, j2.ID)
-	if got.Status != JobError {
-		t.Fatal("restart should fail running jobs")
+	for _, id := range []int64{j2.ID, j3.ID} {
+		if got, _ := s.Job(ctx, id); got.Status != JobError {
+			t.Fatal("restart should fail queued and running jobs")
+		}
 	}
 	if err := s.FinishJob(ctx, j2.ID, ""); err != nil {
 		t.Fatal(err)
@@ -323,6 +332,41 @@ func TestJobs(t *testing.T) {
 	var nilJob *Job
 	if nilJob.Running() {
 		t.Fatal("nil job is not running")
+	}
+
+	// Character jobs are tracked apart from story-level ones.
+	c := &Character{StoryID: st.ID, Name: "Pip"}
+	_ = s.InsertCharacter(ctx, c)
+	cj, _ := s.CreateJob(ctx, st.ID, c.ID, "sheet", "Revising…", 0)
+	if running, _ := s.AnyRunning(ctx, st.ID); !running {
+		t.Fatal("a queued character job counts as running")
+	}
+	if latest, _ := s.LatestJob(ctx, st.ID); latest.ID == cj.ID {
+		t.Fatal("LatestJob must skip character jobs")
+	}
+	perChar, err := s.LatestCharacterJobs(ctx, st.ID)
+	if err != nil || perChar[c.ID] == nil || perChar[c.ID].ID != cj.ID || perChar[c.ID].CharacterID != c.ID {
+		t.Fatalf("latest character jobs: %+v %v", perChar, err)
+	}
+	// A running job is shown even when a newer one is queued behind it.
+	_ = s.StartJob(ctx, cj.ID)
+	queued, _ := s.CreateJob(ctx, st.ID, c.ID, "edit", "Saving…", 0)
+	perChar, _ = s.LatestCharacterJobs(ctx, st.ID)
+	if perChar[c.ID].ID != cj.ID {
+		t.Fatalf("the running job should be shown over the queued one: %+v", perChar[c.ID])
+	}
+	_ = s.FinishJob(ctx, cj.ID, "nope")
+	perChar, _ = s.LatestCharacterJobs(ctx, st.ID)
+	if perChar[c.ID].ID != queued.ID || !perChar[c.ID].Queued() {
+		t.Fatal("with nothing running, the newest job wins")
+	}
+	_ = s.FinishJob(ctx, queued.ID, "")
+	perChar, _ = s.LatestCharacterJobs(ctx, st.ID)
+	if perChar[c.ID].ID != queued.ID || perChar[c.ID].Status != JobDone {
+		t.Fatal("the newest job per character wins")
+	}
+	if running, _ := s.AnyRunning(ctx, st.ID); running {
+		t.Fatal("nothing running once every job finished")
 	}
 }
 

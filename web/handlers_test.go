@@ -150,80 +150,70 @@ func TestCharacterEditDialogAndSave(t *testing.T) {
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "A name and an appearance are required") {
 		t.Fatalf("invalid edit: %d", resp.StatusCode)
 	}
-	// Words-only change: saved, no redraw.
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara Quinn"}, "role": {"lead"}, "age": {"12 years old"}, "visual": {"Small and wiry with a round face, freckles across the nose, wide hazel eyes and a mop of curly copper hair that never stays put."}, "wardrobe": {"An oversized mustard-yellow raincoat over a striped tee, rolled jeans and red rubber boots."}, "items": {"A brass compass on a string and a battered satchel."}, "personality": {"calm"}, "redraw": {"1"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Saved Mara Quinn") || strings.Contains(body, "Redrawing the sheet") {
+	// Words-only change: saved, sheet kept.
+	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara"}, "role": {"lead"}, "age": {"12 years old"}, "visual": {"Small and wiry with a round face, freckles across the nose, wide hazel eyes and a mop of curly copper hair that never stays put."}, "wardrobe": {"An oversized mustard-yellow raincoat over a striped tee, rolled jeans and red rubber boots."}, "items": {"A brass compass on a string and a battered satchel."}, "personality": {"calm"}, "redraw": {"1"}}, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Saving Mara") {
 		t.Fatalf("save words: %d %s", resp.StatusCode, body[:200])
 	}
-	// Look change with redraw in the art phase redraws.
-	e.hold()
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara Quinn"}, "visual": {"tall now"}, "redraw": {"1"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Redrawing the sheet with the new details") {
-		t.Fatalf("save look: %d", resp.StatusCode)
+	e.waitIdle()
+	_, body = e.get(base + "/characters")
+	if !strings.Contains(body, "lead") || !strings.Contains(body, "calm") {
+		t.Fatal("edit should be applied")
 	}
-	// Busy: editing is refused.
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara"}, "visual": {"x"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "still being worked on") {
-		t.Fatalf("busy edit: %d", resp.StatusCode)
+	// A look change while a revision runs is queued, not refused, and wins.
+	e.hold()
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "older"}, nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Mara") {
+		t.Fatalf("adjust: %d", resp.StatusCode)
+	}
+	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara"}, "visual": {"tall now"}, "redraw": {"1"}}, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Queued behind the change already running") {
+		t.Fatalf("queued edit: %d %s", resp.StatusCode, body[:300])
+	}
+	// The card keeps showing the running revision (not the queued edit) and polls.
+	if !strings.Contains(body, "Revising the character") || strings.Contains(body, "Waiting its turn") || !strings.Contains(body, `hx-trigger="every 2s"`) {
+		t.Fatal("the card should show the running job and keep polling")
 	}
 	e.release()
 	e.waitIdle()
-	// Plain redraw button and the lightbox.
-	e.hold()
+	_, body = e.get(base + "/characters")
+	if !strings.Contains(body, "tall now") || strings.Contains(body, "Waiting its turn") {
+		t.Fatal("the queued edit should be applied after the revision")
+	}
+	// Plain redraw and the lightbox.
 	resp, body = e.post(base+"/characters/"+cid+"/redraw", nil, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Redrawing Mara Quinn") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Redrawing Mara") {
 		t.Fatalf("redraw: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/characters/"+cid+"/redraw", nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("second redraw while busy should say so")
-	}
-	e.release()
 	e.waitIdle()
 	resp, body = e.get(base + "/characters/" + cid + "/view?img=1")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "character sheet") {
 		t.Fatalf("lightbox: %d", resp.StatusCode)
 	}
-	// Adjust dialog while busy is refused; feedback path works.
-	resp, body = e.get(base + "/characters/" + cid + "/adjust")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Adjust Mara Quinn") {
-		t.Fatalf("adjust dialog: %d", resp.StatusCode)
-	}
-	e.hold()
-	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "older"}, nil, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Mara Quinn") {
-		t.Fatalf("adjust: %d", resp.StatusCode)
-	}
-	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "older"}, nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("adjust while busy should say so")
-	}
-	e.release()
-	e.waitIdle()
-	// Cast-level adjust: empty refused, then runs.
+	// Cast-level adjust: empty refused, then runs; story buttons disable while it is active.
 	resp, body = e.post(base+"/characters/adjust", url.Values{"feedback": {""}}, true)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("empty cast adjust: %d", resp.StatusCode)
 	}
 	e.hold()
 	resp, body = e.post(base+"/characters/adjust", url.Values{"feedback": {"everyone taller"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising the cast") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising the cast") || !strings.Contains(body, "Adjust the cast</button>") {
 		t.Fatalf("cast adjust: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/characters/adjust", url.Values{"feedback": {"again"}}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("cast adjust while busy")
+	if !strings.Contains(body, `disabled`) {
+		t.Fatal("story-level buttons disable while the cast is being revised")
 	}
-	resp, body = e.post(base+"/characters/draw", nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("draw while busy")
-	}
-	resp, body = e.post(base+"/characters/approve", nil, true)
-	if !strings.Contains(body, "Draw the sheets first") && !strings.Contains(body, "Still working") {
-		t.Fatalf("approve while busy: %s", body[:200])
+	// A character change during a story-level job queues behind it.
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "hat"}, nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn") {
+		t.Fatalf("character work should queue behind the story job: %d", resp.StatusCode)
 	}
 	e.release()
 	e.waitIdle()
+	_, body = e.get(base + "/characters")
+	if !strings.Contains(body, "revised: hat") {
+		t.Fatal("the queued character change ran after the cast revision")
+	}
 }
 
 func TestReferenceEdgeCases(t *testing.T) {
@@ -268,19 +258,23 @@ func TestReferenceEdgeCases(t *testing.T) {
 	if !strings.Contains(body, "choose one image") {
 		t.Fatal("two sheets should be refused")
 	}
-	// A busy story refuses reference and sheet uploads.
+	// Uploads during a running change are queued behind it.
 	e.hold()
 	resp, _ = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "slow"}, nil, true)
 	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"a.png": tinyPNG()}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("refs while busy")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Queued behind") {
+		t.Fatalf("refs while busy should queue: %d", resp.StatusCode)
 	}
 	resp, body = e.postMultipartField(base+"/characters/"+cid+"/sheet", nil, "sheet", map[string][]byte{"a.png": tinyPNG()}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("sheet while busy")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Queued behind") {
+		t.Fatalf("sheet while busy should queue: %d", resp.StatusCode)
 	}
 	e.release()
 	e.waitIdle()
+	_, body = e.get(base + "/characters")
+	if strings.Count(body, `character sheet"`) != 1 {
+		t.Fatal("the queued sheet upload should have landed")
+	}
 	// Deleting a reference via a plain form (from the script page) redirects.
 	resp, _ = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"a.png": tinyPNG()}, true)
 	e.waitIdle()
@@ -312,14 +306,14 @@ func TestPagesAndBookFlows(t *testing.T) {
 		t.Fatalf("page adjust: %d", resp.StatusCode)
 	}
 	resp, body = e.post(base+"/pages/"+pid+"/adjust", url.Values{"feedback": {"again"}}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("page adjust while busy")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn") {
+		t.Fatal("a second page adjustment queues behind the first")
 	}
 	e.release()
 	e.waitIdle()
 	_, body = e.get(base + "/pages")
-	if !strings.Contains(body, "Will be redrawn") || !strings.Contains(body, "Draw the changed pages") {
-		t.Fatal("an adjusted page is marked for redraw")
+	if !strings.Contains(body, "Will be redrawn") || !strings.Contains(body, "Draw the changed pages") || !strings.Contains(body, "revised: again") {
+		t.Fatal("both adjustments applied in order and the page is marked for redraw")
 	}
 
 	// Whole-plan adjust: dialog, empty, run, busy.
@@ -336,17 +330,8 @@ func TestPagesAndBookFlows(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising the pages") {
 		t.Fatalf("pages adjust: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/pages/adjust", url.Values{"feedback": {"x"}}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("pages adjust while busy")
-	}
-	resp, body = e.post(base+"/pages/restart", nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("restart while busy")
-	}
-	resp, body = e.post(base+"/pages/approve", nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("approve while busy")
+	if !strings.Contains(body, "Revising the pages") || !strings.Contains(body, `hx-trigger="every 2s"`) {
+		t.Fatal("the panel polls while the plan is revised")
 	}
 	e.release()
 	e.waitIdle()
@@ -367,9 +352,8 @@ func TestPagesAndBookFlows(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Drawing the missing pages") {
 		t.Fatalf("book draw: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/book/draw", nil, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("book draw while busy")
+	if !strings.Contains(body, "Drawing your pages") {
+		t.Fatal("the job bar shows the running render")
 	}
 	e.release()
 	e.waitIdle()
@@ -385,8 +369,8 @@ func TestPagesAndBookFlows(t *testing.T) {
 		t.Fatalf("redraw: %d", resp.StatusCode)
 	}
 	resp, body = e.post(base+"/book/"+pid+"/redraw", url.Values{"feedback": {""}}, true)
-	if !strings.Contains(body, "Still working") {
-		t.Fatal("redraw while busy")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn") {
+		t.Fatal("a second redraw queues behind the first")
 	}
 	for _, p := range []string{base + "/book/panel", base + "/pages/panel", base + "/characters/panel"} {
 		resp, body = e.get(p)
@@ -463,5 +447,48 @@ func TestBookWithoutArtAndEmptyStates(t *testing.T) {
 	}
 	if sameName("MARA,", "mara quinn") != true || sameName("Al", "Al Capone") != false || sameName("", "x") {
 		t.Fatal("sameName")
+	}
+}
+
+func TestTwoCharactersCanBeEditedAtOnce(t *testing.T) {
+	e := newEnv(t)
+	e.signup("multitasker")
+	base, _ := e.finished(t)
+	_, body := e.get(base + "/characters")
+	ids := allCharacterIDs(body)
+	e.hold()
+	resp, body := e.postMultipart(base+"/characters/"+ids[0]+"/adjust", map[string]string{"feedback": "older"}, nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Mara") {
+		t.Fatalf("first adjust: %d", resp.StatusCode)
+	}
+	// The second character runs alongside the first.
+	resp, body = e.postMultipart(base+"/characters/"+ids[1]+"/adjust", map[string]string{"feedback": "younger"}, nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Pip") {
+		t.Fatalf("second adjust should be accepted: %d %s", resp.StatusCode, body[:300])
+	}
+	if strings.Count(body, "char--working") != 2 || !strings.Contains(body, `hx-trigger="every 2s"`) || !strings.Contains(body, "Other characters stay editable") {
+		t.Fatalf("two working cards expected:\n%s", body[:500])
+	}
+	// The third card is untouched and its edit runs right away; a story-level
+	// action queues behind the character jobs instead of being refused.
+	resp, body = e.post(base+"/characters/"+ids[2]+"/edit", url.Values{"name": {"Graves"}, "visual": {"tall"}}, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Saving Graves") || strings.Contains(body, "Queued behind") {
+		t.Fatalf("third character edit: %d", resp.StatusCode)
+	}
+	resp, body = e.post(base+"/characters/draw", nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn: Drawing character sheets") {
+		t.Fatalf("draw all should queue: %d %s", resp.StatusCode, body[:300])
+	}
+	if strings.Contains(body, "The last change to") {
+		t.Fatal("no failure yet")
+	}
+	e.release()
+	e.waitIdle()
+	_, body = e.get(base + "/characters")
+	if strings.Contains(body, "char--working") || strings.Contains(body, `hx-trigger="every 2s"`) || strings.Contains(body, "Waiting its turn") {
+		t.Fatal("nothing should be working after the jobs finish")
+	}
+	if !strings.Contains(body, "revised: older") || !strings.Contains(body, "revised: younger") || !strings.Contains(body, ">tall<") && !strings.Contains(body, "tall") {
+		t.Fatal("all changes should have been applied")
 	}
 }

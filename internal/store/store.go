@@ -137,7 +137,10 @@ CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
 	if err != nil {
 		return err
 	}
-	return s.addColumn("characters", "origin_id", "INTEGER")
+	if err := s.addColumn("characters", "origin_id", "INTEGER"); err != nil {
+		return err
+	}
+	return s.addColumn("jobs", "character_id", "INTEGER")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -570,32 +573,40 @@ func orDefault(v, d string) string {
 // ---------- jobs ----------
 
 const (
+	JobQueued  = "queued"
 	JobRunning = "running"
 	JobDone    = "done"
 	JobError   = "error"
 )
 
 type Job struct {
-	ID        int64
-	StoryID   int64
-	Kind      string
-	Status    string
-	Progress  int
-	Total     int
-	Message   string
-	Error     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          int64
+	StoryID     int64
+	CharacterID int64 // 0 = a story-level job; otherwise the one character it works on
+	Kind        string
+	Status      string
+	Progress    int
+	Total       int
+	Message     string
+	Error       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (j *Job) Running() bool { return j != nil && j.Status == JobRunning }
 
-const jobCols = `id, story_id, kind, status, progress, total, message, error, created_at, updated_at`
+// Queued reports whether the job is waiting for its turn.
+func (j *Job) Queued() bool { return j != nil && j.Status == JobQueued }
+
+// Active is queued or running: the UI keeps polling while any job is active.
+func (j *Job) Active() bool { return j.Queued() || j.Running() }
+
+const jobCols = `id, story_id, COALESCE(character_id, 0), kind, status, progress, total, message, error, created_at, updated_at`
 
 func scanJob(row scanner) (*Job, error) {
 	var j Job
 	var c, u string
-	if err := row.Scan(&j.ID, &j.StoryID, &j.Kind, &j.Status, &j.Progress, &j.Total, &j.Message, &j.Error, &c, &u); err != nil {
+	if err := row.Scan(&j.ID, &j.StoryID, &j.CharacterID, &j.Kind, &j.Status, &j.Progress, &j.Total, &j.Message, &j.Error, &c, &u); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -605,10 +616,12 @@ func scanJob(row scanner) (*Job, error) {
 	return &j, nil
 }
 
-func (s *Store) CreateJob(ctx context.Context, storyID int64, kind, message string, total int) (*Job, error) {
+// CreateJob records a queued job; characterID 0 means story-level. StartJob
+// flips it to running when the scheduler picks it up.
+func (s *Store) CreateJob(ctx context.Context, storyID, characterID int64, kind, message string, total int) (*Job, error) {
 	t := now()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO jobs (story_id, kind, status, progress, total, message, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
-		storyID, kind, JobRunning, 0, total, message, t, t)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO jobs (story_id, character_id, kind, status, progress, total, message, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		storyID, nullable(characterID), kind, JobQueued, 0, total, message, t, t)
 	if err != nil {
 		return nil, err
 	}
@@ -620,13 +633,51 @@ func (s *Store) Job(ctx context.Context, id int64) (*Job, error) {
 	return scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobCols+` FROM jobs WHERE id = ?`, id))
 }
 
-// LatestJob returns the most recent job for a story, or nil.
+// LatestJob returns the most recent story-level job for a story, or nil.
 func (s *Store) LatestJob(ctx context.Context, storyID int64) (*Job, error) {
-	j, err := scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobCols+` FROM jobs WHERE story_id = ? ORDER BY id DESC LIMIT 1`, storyID))
+	j, err := scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobCols+` FROM jobs WHERE story_id = ? AND character_id IS NULL ORDER BY id DESC LIMIT 1`, storyID))
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
 	}
 	return j, err
+}
+
+// LatestCharacterJobs returns one job per character for the cards to show:
+// the running one when there is one (a queued change behind it must not hide
+// it), otherwise the character's most recent job (queued, done or failed).
+func (s *Store) LatestCharacterJobs(ctx context.Context, storyID int64) (map[int64]*Job, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+jobCols+` FROM jobs WHERE story_id = ? AND character_id IS NOT NULL ORDER BY id DESC`, storyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]*Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		cur, seen := out[j.CharacterID]
+		if !seen || (j.Running() && !cur.Running()) {
+			out[j.CharacterID] = j
+		}
+	}
+	return out, rows.Err()
+}
+
+// AnyRunning reports whether any job (story-level or per character) is
+// queued or running for a story — what decides whether the step panel
+// keeps polling.
+func (s *Store) AnyRunning(ctx context.Context, storyID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE story_id = ? AND status IN (?, ?)`, storyID, JobRunning, JobQueued).Scan(&n)
+	return n > 0, err
+}
+
+// StartJob marks a queued job running and restarts its clock.
+func (s *Store) StartJob(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status=?, created_at=?, updated_at=? WHERE id=?`, JobRunning, now(), now(), id)
+	return err
 }
 
 func (s *Store) UpdateJob(ctx context.Context, id int64, progress, total int, message string) error {
@@ -643,9 +694,10 @@ func (s *Store) FinishJob(ctx context.Context, id int64, errMsg string) error {
 	return err
 }
 
-// FailRunningJobs marks jobs left running by a previous process as failed.
+// FailRunningJobs marks jobs left queued or running by a previous process
+// as failed: the queue lives in memory and did not survive.
 func (s *Store) FailRunningJobs(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status=?, error=?, updated_at=? WHERE status=?`, JobError, "interrupted by a server restart", now(), JobRunning)
+	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status=?, error=?, updated_at=? WHERE status IN (?, ?)`, JobError, "interrupted by a server restart", now(), JobRunning, JobQueued)
 	return err
 }
 
