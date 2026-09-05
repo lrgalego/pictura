@@ -22,5 +22,7 @@ implementation detail for the git hooks, not an interface.
 
 Three rules: deploys ship only commits already on `origin/main` (the push
 gate runs tests + coverage); the machine is never edited by hand (every
-deploy re-converges it from this repo); any command shows its exact script and env with `--print`
+deploy re-converges it from this repo, and
+`box-1` is shared — other apps live beside this one, mutually
+ignorant); any command shows its exact script and env with `--print`
 before you commit to running it.

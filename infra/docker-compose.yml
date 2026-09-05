@@ -15,6 +15,12 @@ services:
     # preflight asks the machine for conflicts before converging.
     expose:
       - "8080"
+    # Resource ceilings from [app] memory/cpus — on a shared machine these are
+    # what keep one app from starving its neighbours.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     volumes:
       # The directory, not a .db file: WAL keeps -wal/-shm sidecars beside it.
       - ./data:/data

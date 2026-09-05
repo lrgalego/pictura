@@ -11,6 +11,10 @@ state_dir  = "/data"
 # mounted volume (the binary defaults to ./data, which is not writable in the
 # distroless image).
 server_args = ["--data", "/data"]
+# Memory ceiling for this container: required on a shared machine so one app
+# cannot starve its neighbours. Generous for a Go server holding a few
+# multi-megabyte PNGs while pages render.
+memory     = "1g"
 
 [build]
 private_modules = ["github.com/lrgalego"]
@@ -25,8 +29,8 @@ coverage_exclude = ["/cmd/server/main.go"]
 # The machine this app deploys to. In shared mode, other apps declare the
 # same [machine] tables and stay mutually ignorant of each other.
 [machine]
-mode     = "solo"
-name     = "story-time"
+mode     = "shared"
+name     = "box-1"
 provider = "hetzner"
 
 [machine.access]
@@ -36,7 +40,7 @@ user = "root"
 
 [machine.hetzner]
 location    = "nbg1"
-server_type = "cx32"
+server_type = "cx22"
 
 [registry]
 repo = "ghcr.io/lrgalego/story-time"
@@ -45,8 +49,8 @@ user = "lrgalego"
 
 [ingress]
 provider  = "cloudflare"
-hostname  = "story-time.example.com"
-tunnel_id = ""
+hostname  = "pictura.fun"
+tunnel_id = "64090fde-109c-4bc2-8eba-5302fad088b1"
 
 [secrets]
 provider = "op"

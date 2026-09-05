@@ -3,7 +3,7 @@
 # The tunnel dials out to Cloudflare, so the VM needs no inbound firewall rule
 # and no published port. `server` resolves over the compose network.
 
-tunnel: 
+tunnel: 64090fde-109c-4bc2-8eba-5302fad088b1
 credentials-file: /etc/cloudflared/credentials.json
 
 # Keep the origin connection cheap: TLS terminates at Cloudflare's edge and the
@@ -11,7 +11,7 @@ credentials-file: /etc/cloudflared/credentials.json
 # detect the browser's real scheme from X-Forwarded-Proto, which cloudflared
 # sets — e.g. for a session cookie's Secure flag.
 ingress:
-  - hostname: story-time.example.com
+  - hostname: pictura.fun
     service: http://server:8080
   # Anything not matching the hostname above is refused rather than forwarded.
   - service: http_status:404
