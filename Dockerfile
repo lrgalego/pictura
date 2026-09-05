@@ -65,4 +65,4 @@ USER nonroot:nonroot
 # --host is the important one: servers default to 127.0.0.1, which would be
 # unreachable from outside the container.
 ENTRYPOINT ["/usr/local/bin/server"]
-CMD ["--host", "0.0.0.0", "--port", "8080"]
+CMD ["--host", "0.0.0.0", "--port", "8080", "--data", "/data"]

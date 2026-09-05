@@ -47,6 +47,7 @@
             [
               pkgs.go_1_26
               (templShim pkgs)
+              pkgs.hcloud
               pkgs.cloudflared
               pkgs.git
               pkgs.gnumake

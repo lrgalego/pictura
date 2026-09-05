@@ -7,6 +7,10 @@ binaries   = ["server:./cmd/server"]
 port       = 8080
 health     = "/healthz"
 state_dir  = "/data"
+# The container writes its SQLite database and generated images here, on the
+# mounted volume (the binary defaults to ./data, which is not writable in the
+# distroless image).
+server_args = ["--data", "/data"]
 
 [build]
 private_modules = ["github.com/lrgalego"]
@@ -23,12 +27,16 @@ coverage_exclude = ["/cmd/server/main.go"]
 [machine]
 mode     = "solo"
 name     = "story-time"
-provider = "unmanaged"
+provider = "hetzner"
 
 [machine.access]
-address = "127.0.0.1"
+# address is recorded automatically by `shipyard provision` (hetzner).
 port = 22
 user = "root"
+
+[machine.hetzner]
+location    = "nbg1"
+server_type = "cx32"
 
 [registry]
 repo = "ghcr.io/lrgalego/story-time"

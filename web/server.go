@@ -150,8 +150,16 @@ func (s *server) setSession(w http.ResponseWriter, r *http.Request, userID int64
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: secureRequest(r), SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600})
 	return nil
+}
+
+// secureRequest reports whether the client reached us over HTTPS. In
+// production TLS terminates at Cloudflare's edge and the origin hop is plain
+// HTTP, so the forwarded proto header is what decides the cookie's Secure
+// flag; locally (plain HTTP, no proxy) the cookie stays usable.
+func secureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // ---------- helpers ----------

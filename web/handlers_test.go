@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -490,5 +491,37 @@ func TestTwoCharactersCanBeEditedAtOnce(t *testing.T) {
 	}
 	if !strings.Contains(body, "revised: older") || !strings.Contains(body, "revised: younger") || !strings.Contains(body, ">tall<") && !strings.Contains(body, "tall") {
 		t.Fatal("all changes should have been applied")
+	}
+}
+
+func TestSessionCookieIsSecureBehindTLS(t *testing.T) {
+	e := newEnv(t)
+	for i, tc := range []struct {
+		proto  string
+		secure bool
+	}{{"", false}, {"http", false}, {"https", true}, {"HTTPS", true}} {
+		body := url.Values{"username": {fmt.Sprintf("tls-user-%d", i)}, "password": {"correct-horse"}}.Encode()
+		req, _ := http.NewRequest("POST", e.srv.URL+"/signup", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if tc.proto != "" {
+			req.Header.Set("X-Forwarded-Proto", tc.proto)
+		}
+		resp, err := e.client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("signup %q: %v %v", tc.proto, resp, err)
+		}
+		var found bool
+		for _, c := range resp.Cookies() {
+			if c.Name == sessionCookie {
+				found = true
+				if c.Secure != tc.secure || !c.HttpOnly {
+					t.Fatalf("proto %q: Secure=%v HttpOnly=%v", tc.proto, c.Secure, c.HttpOnly)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("proto %q: no session cookie", tc.proto)
+		}
+		e.post("/logout", nil, false)
 	}
 }

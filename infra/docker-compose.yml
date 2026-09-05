@@ -27,6 +27,8 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8080"
+      - "--data"
+      - "/data"
     # Distroless has no shell or curl, so the binary probes itself: this GETs
     # /healthz on 127.0.0.1 and exits non-zero unless it gets a 200.
     # Checking the server actually answers, not merely that PID 1 is alive.
