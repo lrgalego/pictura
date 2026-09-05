@@ -1,0 +1,32 @@
+{
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-01a07242-0bf0-7f52-9a1b-0ddee5f3d10a",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "{\"characters\": [{\"name\": \"Mara\", \"visual\": \"A young girl with curly dark hair wearing a bright yellow raincoat and red rain boots\"}, {\"name\": \"Pip\", \"visual\": \"A small teal box-shaped robot with large round glowing eyes and stubby hovering feet\"}]}",
+          "refusal": null,
+          "role": "assistant"
+        },
+        "logprobs": null
+      }
+    ],
+    "created": 1788623326,
+    "model": "muse-spark-1.3-contributor",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 334,
+      "prompt_tokens": 124,
+      "total_tokens": 458,
+      "completion_tokens_details": {
+        "reasoning_tokens": 262
+      },
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    }
+  }
+}

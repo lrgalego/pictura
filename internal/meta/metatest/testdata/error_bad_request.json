@@ -1,0 +1,11 @@
+{
+  "status": 400,
+  "body": {
+    "error": {
+      "code": null,
+      "message": "\"reasoning_effort\" does not support \"none\" with this model.",
+      "param": "reasoning_effort",
+      "type": "invalid_request_error"
+    }
+  }
+}

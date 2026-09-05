@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,7 +48,39 @@ type env struct {
 	srv    *httptest.Server
 	client *http.Client
 	runner *jobs.Runner
+	st     *store.Store
+	ai     *gated
 }
+
+func (e *env) store() *store.Store { return e.st }
+
+// gated wraps the fake provider so a test can hold every model call open
+// (hold) and let it through later (release), making "busy" states
+// deterministic instead of racing a job that finishes instantly.
+type gated struct {
+	pipeline.Fake
+	mu sync.RWMutex
+}
+
+func (g *gated) ChatJSON(ctx context.Context, system, user string, images []pipeline.Image, schemaName string, schema map[string]any, out any) error {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.Fake.ChatJSON(ctx, system, user, images, schemaName, schema, out)
+}
+func (g *gated) GenerateImage(ctx context.Context, prompt, size string) ([]byte, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.Fake.GenerateImage(ctx, prompt, size)
+}
+func (g *gated) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.Fake.EditImage(ctx, prompt, refs, size)
+}
+
+// hold blocks model calls until release; the next job stays "running".
+func (e *env) hold()    { e.ai.mu.Lock() }
+func (e *env) release() { e.ai.mu.Unlock() }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
@@ -55,12 +89,13 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	runner := jobs.New(st, &pipeline.Fake{}, 2)
+	ai := &gated{}
+	runner := jobs.New(st, ai, 2)
 	srv := httptest.NewServer(Router(Deps{Store: st, Jobs: runner, Fake: true}))
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
-	return &env{t: t, srv: srv, client: client, runner: runner}
+	return &env{t: t, srv: srv, client: client, runner: runner, st: st, ai: ai}
 }
 
 func (e *env) get(path string) (*http.Response, string) {
