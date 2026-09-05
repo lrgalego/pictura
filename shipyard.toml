@@ -34,13 +34,14 @@ name     = "box-1"
 provider = "hetzner"
 
 [machine.access]
+address = "46.224.151.146"
 # address is recorded automatically by `shipyard provision` (hetzner).
 port = 22
 user = "root"
 
 [machine.hetzner]
 location    = "nbg1"
-server_type = "cx22"
+server_type = "cx23"
 
 [registry]
 repo = "ghcr.io/lrgalego/pictura"
