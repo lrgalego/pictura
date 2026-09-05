@@ -1,0 +1,33 @@
+#!/bin/sh
+# Refuse commits made directly on `deploy`.
+#
+# `deploy` is a release pointer, not a place to work: it should only ever move
+# to commits that already exist on `main`, and `make deploy` is what moves it.
+# Committing here would create work that exists nowhere else, which the pre-push
+# hook would then reject anyway — better to stop it at the commit.
+#
+# Bypass with `git commit --no-verify` if you genuinely need to.
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+
+if [ "$branch" = "deploy" ]; then
+	cat >&2 <<-'EOF'
+
+	  refusing to commit on `deploy`.
+
+	  deploy is a release pointer — it only ever fast-forwards to commits that
+	  are already on main, and `make deploy` is what moves it.
+
+	  Work on a feature branch instead:
+
+	      git switch -c my-change main
+	      # ...commit...
+	      git switch main && git merge --ff-only my-change
+
+	  Then release with `make deploy`.
+
+	EOF
+	exit 1
+fi
+
+exit 0

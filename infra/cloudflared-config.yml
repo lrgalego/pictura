@@ -1,0 +1,17 @@
+# Deployed to /opt/story-time/cloudflared/config.yml on the VM.
+#
+# The tunnel dials out to Cloudflare, so the VM needs no inbound firewall rule
+# and no published port. `server` resolves over the compose network.
+
+tunnel: 
+credentials-file: /etc/cloudflared/credentials.json
+
+# Keep the origin connection cheap: TLS terminates at Cloudflare's edge and the
+# hop to the container is plain HTTP inside the compose network. The app should
+# detect the browser's real scheme from X-Forwarded-Proto, which cloudflared
+# sets — e.g. for a session cookie's Secure flag.
+ingress:
+  - hostname: story-time.example.com
+    service: http://server:8080
+  # Anything not matching the hostname above is refused rather than forwarded.
+  - service: http_status:404

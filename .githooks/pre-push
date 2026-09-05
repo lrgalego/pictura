@@ -1,0 +1,107 @@
+#!/bin/sh
+# Two guards, one per protected ref:
+#
+#   main   — runs the tests and the coverage gate before the push is allowed.
+#            This is where quality is enforced: once a commit is on
+#            origin/main it is deployable by definition, so it must be green
+#            *before* it lands there, not discovered red at release time.
+#
+#   deploy — refuses anything not already contained in `main`. This holds even
+#            if someone commits on deploy with --no-verify, or force-pushes an
+#            unrelated branch there. What ships must have passed through main.
+#
+# git feeds this hook one line per ref being pushed, on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+#
+# Bypass with `git push --no-verify` if you genuinely need to.
+
+# Compare against the remote's view of main where possible: that is what other
+# machines would see, and it can't be faked by a stale local branch.
+if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+	main_ref=refs/remotes/origin/main
+elif git rev-parse --verify --quiet refs/heads/main >/dev/null 2>&1; then
+	main_ref=refs/heads/main
+else
+	# No main to compare against (fresh clone, or a fork that renamed it).
+	# Nothing meaningful to enforce.
+	exit 0
+fi
+
+status=0
+gate_ran=0
+
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+	# --- main: tests + coverage before anything lands there ---------------
+	if [ "$remote_ref" = "refs/heads/main" ]; then
+		# Deleting the branch pushes an all-zero sha; nothing to test.
+		case "$local_sha" in
+		*[!0]*) ;;
+		*) continue ;;
+		esac
+		# One run covers every ref in the push. Note this tests the checked-
+		# out working tree, which on a normal `git push origin main` is the
+		# commit being pushed; pushing main from another branch's dirty tree
+		# tests that tree instead — the same honesty limit deploy.sh had, and
+		# why it required a clean tree.
+		[ "$gate_ran" = 1 ] && continue
+		gate_ran=1
+
+		if ! command -v go >/dev/null 2>&1; then
+			cat >&2 <<-'EOF'
+
+			  pushing to main runs the tests, and `go` is not on PATH.
+
+			  Run the push from the dev shell:
+
+			      nix develop --command git push ...
+
+			  Or bypass with --no-verify if you accept pushing untested code.
+
+			EOF
+			status=1
+			continue
+		fi
+
+		echo "pre-push: running tests before updating main..." >&2
+		if ! make test >/dev/null 2>&1; then
+			printf '\n  refusing to push to main: tests fail. Run `make test`.\n\n' >&2
+			status=1
+			continue
+		fi
+		continue
+	fi
+
+	# --- deploy: must be contained in main --------------------------------
+	[ "$remote_ref" = "refs/heads/deploy" ] || continue
+
+	# An all-zero local sha means the branch is being deleted; let that through.
+	case "$local_sha" in
+	*[!0]*) ;;
+	*) continue ;;
+	esac
+
+	if git merge-base --is-ancestor "$local_sha" "$main_ref"; then
+		continue
+	fi
+
+	short=$(git rev-parse --short "$local_sha" 2>/dev/null || echo "$local_sha")
+	cat >&2 <<-EOF
+
+	  refusing to push $short to \`deploy\`.
+
+	  It is not contained in $main_ref, so this would ship code that never
+	  landed on main.
+
+	  Get it onto main first:
+
+	      git switch main
+	      git merge --ff-only <your-branch>
+	      git push origin main
+
+	  Then release with \`make deploy\`.
+
+	EOF
+	status=1
+done
+
+exit "$status"

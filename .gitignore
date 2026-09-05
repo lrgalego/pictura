@@ -1,0 +1,13 @@
+# Live data and local state — the VM is authoritative, never the checkout.
+data/
+bin/
+coverage.out
+coverage.html
+# Local-only env fallback; the workflow is op run with the committed .tpl files.
+.env
+.direnv/
+.DS_Store
+result
+result-*
+# Claude Code local state (settings, worktrees)
+.claude/

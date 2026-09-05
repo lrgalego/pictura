@@ -1,0 +1,53 @@
+# Deployed to /opt/story-time/docker-compose.yml on the VM.
+#
+# SHIPYARD_IMAGE comes from /opt/story-time/.env, which `shipyard deploy`
+# rewrites to a specific sha- tag. Pinning by digest-bearing tag rather than
+# :latest is what makes rollback a one-line edit plus `docker compose up -d`.
+
+services:
+  server:
+    image: ${SHIPYARD_IMAGE}
+    restart: unless-stopped
+    # Deliberately no `ports:` by default. Nothing is published to the host, so
+    # the app is reachable only through cloudflared on the compose network —
+    # there is no open port to find even if a firewall rule were added by
+    # mistake. app.host_ports is the explicit, validated exception; the deploy
+    # preflight asks the machine for conflicts before converging.
+    expose:
+      - "8080"
+    volumes:
+      # The directory, not a .db file: WAL keeps -wal/-shm sidecars beside it.
+      - ./data:/data
+    # Secrets resolved from the vault at deploy time; read by the docker
+    # daemon as root, which is why the file is root-owned on the VM.
+    env_file:
+      - ./secrets/app.env
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+    # Distroless has no shell or curl, so the binary probes itself: this GETs
+    # /healthz on 127.0.0.1 and exits non-zero unless it gets a 200.
+    # Checking the server actually answers, not merely that PID 1 is alive.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/server", "--health-check", "--port", "8080"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - server
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

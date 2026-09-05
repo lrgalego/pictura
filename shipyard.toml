@@ -1,0 +1,43 @@
+# The one committed file shipyard reads: everything the deploy engine and the
+# scaffold know about this project. `shipyard help` for the commands.
+
+[app]
+name       = "story-time"
+binaries   = ["server:./cmd/server"]
+port       = 8080
+health     = "/healthz"
+state_dir  = "/data"
+
+[build]
+private_modules = ["github.com/lrgalego"]
+
+[ui]
+htmx_ds = "v0.9.1"
+
+[gate]
+coverage_min = 0
+
+# The machine this app deploys to. In shared mode, other apps declare the
+# same [machine] tables and stay mutually ignorant of each other.
+[machine]
+mode     = "solo"
+name     = "story-time"
+provider = "unmanaged"
+
+[machine.access]
+address = "127.0.0.1"
+port = 22
+user = "root"
+
+[registry]
+repo = "ghcr.io/lrgalego/story-time"
+auth = "token"
+user = "lrgalego"
+
+[ingress]
+provider  = "cloudflare"
+hostname  = "story-time.example.com"
+tunnel_id = ""
+
+[secrets]
+provider = "op"
