@@ -67,15 +67,17 @@ templ Topbar(p ShellProps) {
 			}
 			<nav class="topbar__nav" aria-label="Main">
 				if p.User != nil {
-					@components.LinkButton(components.LinkButtonProps{Href: "/stories", Variant: components.ButtonGhost, Class: "topbar__hide-sm"}) {
-						Your stories
-					}
-					@components.LinkButton(components.LinkButtonProps{Href: "/cast", Variant: components.ButtonGhost, Class: "topbar__hide-sm"}) {
-						Your cast
-					}
-					@components.LinkButton(components.LinkButtonProps{Href: "/stories/new"}) {
-						@components.IconPlus()
-						<span class="topbar__hide-sm">New story</span>
+					if p.User.Enabled {
+						@components.LinkButton(components.LinkButtonProps{Href: "/stories", Variant: components.ButtonGhost, Class: "topbar__hide-sm"}) {
+							Your stories
+						}
+						@components.LinkButton(components.LinkButtonProps{Href: "/cast", Variant: components.ButtonGhost, Class: "topbar__hide-sm"}) {
+							Your cast
+						}
+						@components.LinkButton(components.LinkButtonProps{Href: "/stories/new"}) {
+							@components.IconPlus()
+							<span class="topbar__hide-sm">New story</span>
+						}
 					}
 					@components.ThemeToggle(components.ThemeToggleProps{})
 					@components.DropdownTrigger("user-menu", "btn btn--ghost btn--icon", templ.Attributes{"aria-label": "Account menu"}) {
@@ -86,19 +88,21 @@ templ Topbar(p ShellProps) {
 							{ p.User.DisplayName }
 						}
 						@components.DropdownSeparator()
-						@components.DropdownLink("/stories", nil) {
-							@components.IconFolderOpen()
-							Your stories
+						if p.User.Enabled {
+							@components.DropdownLink("/stories", nil) {
+								@components.IconFolderOpen()
+								Your stories
+							}
+							@components.DropdownLink("/cast", nil) {
+								@components.IconUser()
+								Your cast
+							}
+							@components.DropdownLink("/stories/new", nil) {
+								@components.IconPlus()
+								New story
+							}
+							@components.DropdownSeparator()
 						}
-						@components.DropdownLink("/cast", nil) {
-							@components.IconUser()
-							Your cast
-						}
-						@components.DropdownLink("/stories/new", nil) {
-							@components.IconPlus()
-							New story
-						}
-						@components.DropdownSeparator()
 						@components.DropdownItem(templ.Attributes{"hx-post": "/logout", "hx-swap": "none"}) {
 							@components.IconLogOut()
 							Log out
@@ -151,4 +155,24 @@ templ ServerError(msg string) {
 			}
 		</p>
 	</div>
+}
+
+// Pending parks an account that is not enabled yet.
+templ Pending(u *store.User) {
+	<section class="auth">
+		<div class="wrap">
+			<div class="panel auth__card pending">
+				<div class="pending__glyph">🎟️</div>
+				<h1>Almost there</h1>
+				<p class="auth__lede">{ "Your account is created, " + u.DisplayName + ". It needs to be enabled before you can start a story; you'll be able to log in and go straight to work once it is." }</p>
+				<p class="note">Signed in as { u.Username }.</p>
+				<div class="form__actions">
+					@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": "/logout", "hx-swap": "none"}}) {
+						@components.IconLogOut()
+						Log out
+					}
+				</div>
+			</div>
+		</div>
+	</section>
 }

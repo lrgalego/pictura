@@ -140,7 +140,10 @@ CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
 	if err := s.addColumn("characters", "origin_id", "INTEGER"); err != nil {
 		return err
 	}
-	return s.addColumn("jobs", "character_id", "INTEGER")
+	if err := s.addColumn("jobs", "character_id", "INTEGER"); err != nil {
+		return err
+	}
+	return s.addColumn("users", "enabled", "INTEGER NOT NULL DEFAULT 0")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -183,6 +186,7 @@ type User struct {
 	Username     string
 	DisplayName  string
 	PasswordHash string
+	Enabled      bool // signing up does not enable an account; an operator does
 	CreatedAt    time.Time
 }
 
@@ -199,18 +203,52 @@ func (s *Store) CreateUser(ctx context.Context, username, displayName, hash stri
 	return s.UserByID(ctx, id)
 }
 
+const userCols = `id, username, display_name, password_hash, enabled, created_at`
+
 func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
-	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, password_hash, created_at FROM users WHERE id = ?`, id))
+	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (*User, error) {
-	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, password_hash, created_at FROM users WHERE username = ?`, strings.ToLower(username)))
+	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE username = ?`, strings.ToLower(username)))
+}
+
+// SetUserEnabled flips the account flag by username.
+func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET enabled = ? WHERE username = ?`, enabled, strings.ToLower(username))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Users lists every account, oldest first.
+func (s *Store) Users(ctx context.Context) ([]*User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		var u User
+		var created string
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &created); err != nil {
+			return nil, err
+		}
+		u.CreatedAt = parseTime(created)
+		out = append(out, &u)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) scanUser(row *sql.Row) (*User, error) {
 	var u User
 	var created string
-	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &created); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &created); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

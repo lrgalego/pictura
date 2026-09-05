@@ -13,20 +13,21 @@ import (
 )
 
 func (s *server) home(w http.ResponseWriter, r *http.Request) {
-	render(w, r, views.Shell(s.shell(r, "Turn a script into a comic"), views.Home(userFrom(r.Context()) != nil)))
+	u := userFrom(r.Context())
+	render(w, r, views.Shell(s.shell(r, "Turn a script into a comic"), views.Home(u != nil && u.Enabled)))
 }
 
 func (s *server) loginPage(w http.ResponseWriter, r *http.Request) {
-	if userFrom(r.Context()) != nil {
-		http.Redirect(w, r, "/stories", http.StatusSeeOther)
+	if u := userFrom(r.Context()); u != nil {
+		http.Redirect(w, r, landing(u, ""), http.StatusSeeOther)
 		return
 	}
 	render(w, r, views.Shell(s.shell(r, "Log in"), views.Login(views.AuthForm{Next: r.URL.Query().Get("next")})))
 }
 
 func (s *server) signupPage(w http.ResponseWriter, r *http.Request) {
-	if userFrom(r.Context()) != nil {
-		http.Redirect(w, r, "/stories", http.StatusSeeOther)
+	if u := userFrom(r.Context()); u != nil {
+		http.Redirect(w, r, landing(u, ""), http.StatusSeeOther)
 		return
 	}
 	render(w, r, views.Shell(s.shell(r, "Create your account"), views.Signup(views.AuthForm{})))
@@ -64,7 +65,7 @@ func (s *server) signup(w http.ResponseWriter, r *http.Request) {
 				s.fail(w, r, err)
 				return
 			}
-			redirect(w, r, "/stories/new")
+			redirect(w, r, landing(u, "/stories/new"))
 			return
 		}
 	}
@@ -88,11 +89,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
-		next := f.Next
-		if next == "" || !strings.HasPrefix(next, "/") {
-			next = "/stories"
-		}
-		redirect(w, r, next)
+		redirect(w, r, landing(u, f.Next))
 		return
 	}
 	f.Password = ""
@@ -110,6 +107,19 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	redirect(w, r, "/")
+}
+
+// pending is the parking page for an account nobody has enabled yet.
+func (s *server) pending(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	switch {
+	case u == nil:
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	case u.Enabled:
+		http.Redirect(w, r, "/stories", http.StatusSeeOther)
+	default:
+		render(w, r, views.Shell(s.shell(r, "Almost there"), views.Pending(u)))
+	}
 }
 
 // media serves a generated image, only to the story's owner.

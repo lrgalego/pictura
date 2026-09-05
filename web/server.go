@@ -54,6 +54,7 @@ func Router(d Deps) http.Handler {
 	mux.HandleFunc("GET /signup", s.signupPage)
 	mux.HandleFunc("POST /signup", s.signup)
 	mux.HandleFunc("POST /logout", s.logout)
+	mux.HandleFunc("GET /pending", s.pending)
 
 	auth := s.requireUser
 	mux.Handle("GET /stories", auth(s.library))
@@ -130,19 +131,41 @@ func userFrom(ctx context.Context) *store.User {
 	return u
 }
 
+// requireUser lets only logged-in, enabled accounts through. A signed-up
+// account that nobody has enabled yet is parked on /pending.
 func (s *server) requireUser(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if userFrom(r.Context()) == nil {
+		u := userFrom(r.Context())
+		switch {
+		case u == nil:
 			if layout.IsFragment(r) {
 				w.Header().Set("HX-Redirect", "/login")
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			http.Redirect(w, r, "/login?next="+r.URL.Path, http.StatusSeeOther)
-			return
+		case !u.Enabled:
+			if layout.IsFragment(r) {
+				w.Header().Set("HX-Redirect", "/pending")
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			http.Redirect(w, r, "/pending", http.StatusSeeOther)
+		default:
+			next(w, r)
 		}
-		next(w, r)
 	})
+}
+
+// landing is where a freshly authenticated user goes.
+func landing(u *store.User, next string) string {
+	if !u.Enabled {
+		return "/pending"
+	}
+	if next == "" || !strings.HasPrefix(next, "/") || next == "/pending" {
+		return "/stories"
+	}
+	return next
 }
 
 func (s *server) setSession(w http.ResponseWriter, r *http.Request, userID int64) error {

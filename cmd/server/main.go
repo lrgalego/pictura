@@ -29,6 +29,9 @@ func main() {
 	envFile := flag.String("env-file", ".env", "optional KEY=VALUE file loaded into the environment (META_API_KEY)")
 	fakeAI := flag.Bool("fake-ai", false, "use the offline fake model provider even if META_API_KEY is set")
 	healthCheck := flag.Bool("health-check", false, "probe /healthz on 127.0.0.1 and exit; used by the container healthcheck")
+	enableUser := flag.String("enable-user", "", "enable this account and exit (signing up does not enable an account)")
+	disableUser := flag.String("disable-user", "", "disable this account and exit")
+	listUsers := flag.Bool("list-users", false, "print every account with its enabled flag and exit")
 	flag.Parse()
 
 	if *healthCheck {
@@ -42,6 +45,10 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
+
+	if *enableUser != "" || *disableUser != "" || *listUsers {
+		os.Exit(manageUsers(st, *enableUser, *disableUser, *listUsers))
+	}
 	if err := st.FailRunningJobs(context.Background()); err != nil {
 		log.Printf("reset jobs: %v", err)
 	}
@@ -103,6 +110,36 @@ func loadEnvFile(path string) {
 			os.Setenv(k, v)
 		}
 	}
+}
+
+// manageUsers is the operator's switch until there is an admin screen:
+// run the same binary against the data dir with --enable-user <name>.
+func manageUsers(st *store.Store, enable, disable string, list bool) int {
+	ctx := context.Background()
+	for _, op := range []struct {
+		name    string
+		enabled bool
+	}{{enable, true}, {disable, false}} {
+		if op.name == "" {
+			continue
+		}
+		if err := st.SetUserEnabled(ctx, op.name, op.enabled); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", op.name, err)
+			return 1
+		}
+		fmt.Printf("%s: enabled=%v\n", strings.ToLower(op.name), op.enabled)
+	}
+	if list {
+		users, err := st.Users(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		for _, u := range users {
+			fmt.Printf("%-24s enabled=%-5v created %s\n", u.Username, u.Enabled, u.CreatedAt.Format("2006-01-02"))
+		}
+	}
+	return 0
 }
 
 func probe(port int) int {

@@ -436,3 +436,6 @@ h1, h2, h3, .display {
 }
 .char__failed { padding: 0.75rem 0.9rem 0; }
 .char--working { outline: 3px solid var(--primary); outline-offset: 3px; }
+.pending { text-align: center; }
+.pending__glyph { font-size: 3rem; line-height: 1; margin-bottom: 0.5rem; }
+.pending .form__actions { justify-content: center; margin-top: 1rem; }

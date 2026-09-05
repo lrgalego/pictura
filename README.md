@@ -12,7 +12,9 @@ The workflow, one screen per step:
 3. **Pages** — the script becomes pages of panels with shots, dialogue and captions. Adjust one page or the whole plan.
 4. **Comic** — pages are drawn with the character sheets as references so the cast stays on-model. Redraw any page with notes; download as PDF or a zip of PNGs.
 
-Accounts keep a library of stories to revisit and iterate on, and a **cast
+Signing up creates a disabled account parked on a "waiting to be enabled"
+page; an operator enables it (see below). Accounts keep a library of stories
+to revisit and iterate on, and a **cast
 registry** across stories: when a new script names a character you already
 have, the casting step suggests reusing them (look, references and finished
 sheet are copied, no redraw needed), and any character from another story can
@@ -44,6 +46,23 @@ and streams the value to the machine. Without a key the server starts in
 placeholder-art mode so the whole workflow can be exercised for free.
 
 Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.
+
+## Enabling accounts
+
+There is no admin screen yet. The server binary doubles as the switch; run it
+against the data directory:
+
+```sh
+./bin/server --data ./data --list-users
+./bin/server --data ./data --enable-user lucas
+./bin/server --data ./data --disable-user someone
+```
+
+In production the same image runs as a one-off container on the box:
+
+```sh
+shipyard ssh 'cd /opt/pictura && sudo docker compose run --rm --no-deps server --data /data --enable-user lucas'
+```
 
 ## Layout
 

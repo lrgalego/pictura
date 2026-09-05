@@ -125,11 +125,15 @@ func (e *env) post(path string, form url.Values, hx bool) (*http.Response, strin
 	return resp, string(b)
 }
 
+// signup registers an account and enables it, the way an operator would.
 func (e *env) signup(name string) {
 	e.t.Helper()
 	resp, body := e.post("/signup", url.Values{"username": {name}, "password": {"correct-horse"}}, false)
-	if resp.StatusCode != http.StatusSeeOther {
-		e.t.Fatalf("signup: %d %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/pending" {
+		e.t.Fatalf("signup: %d %s %s", resp.StatusCode, resp.Header.Get("Location"), body)
+	}
+	if err := e.st.SetUserEnabled(context.Background(), name, true); err != nil {
+		e.t.Fatal(err)
 	}
 }
 
@@ -323,7 +327,7 @@ func TestFullWorkflow(t *testing.T) {
 // newEnvClient is a second logged-in user against the same server.
 func newEnvClient(t *testing.T, e *env) *env {
 	jar, _ := cookiejar.New(nil)
-	o := &env{t: t, srv: e.srv, runner: e.runner, client: &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
+	o := &env{t: t, srv: e.srv, runner: e.runner, st: e.st, ai: e.ai, client: &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
 	o.signup("snoop")
 	return o
 }

@@ -11,6 +11,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -57,6 +58,7 @@ var (
 	browser playwright.Browser
 	expect  playwright.PlaywrightAssertions
 	refPNG  string
+	db      *store.Store
 )
 
 func TestMain(m *testing.M) {
@@ -80,6 +82,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	db = st
 	runner := jobs.New(st, &pipeline.Fake{Delay: 250 * time.Millisecond}, 3)
 	ts := httptest.NewServer(web.Router(web.Deps{Store: st, Jobs: runner, Fake: true}))
 	baseURL = ts.URL
@@ -137,13 +140,21 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// signup registers a fresh user through the form and lands on the new-story page.
+// signup registers a fresh user through the form, which parks it on the
+// pending page, then enables it the way an operator would and opens the
+// new-story page.
 func signup(t *testing.T, page playwright.Page, name string) {
 	t.Helper()
 	goto_(t, page, baseURL+"/signup")
 	must(t, page.Fill("#username", name))
 	must(t, page.Fill("#password", "correct-horse"))
 	must(t, page.Click("button[type=submit]"))
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pending$`)))
+	must(t, expect.Locator(page.Locator("h1")).ToContainText("Almost there"))
+	if err := db.SetUserEnabled(context.Background(), name, true); err != nil {
+		t.Fatal(err)
+	}
+	goto_(t, page, baseURL+"/stories/new")
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/stories/new$`)))
 }
 
@@ -176,7 +187,16 @@ func TestSignupValidationAndLogin(t *testing.T) {
 	must(t, page.Fill("#username", "browser-user"))
 	must(t, page.Fill("#password", "correct-horse"))
 	must(t, page.Click("button[type=submit]"))
-	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/stories/new$`)))
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pending$`)))
+	must(t, expect.Locator(page.Locator("h1")).ToContainText("Almost there"))
+	// Until an operator enables the account, the app stays out of reach.
+	goto_(t, page, baseURL+"/stories")
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pending$`)))
+	if err := db.SetUserEnabled(context.Background(), "browser-user", true); err != nil {
+		t.Fatal(err)
+	}
+	goto_(t, page, baseURL+"/stories")
+	must(t, expect.Locator(page.Locator("h1")).ToContainText("Your stories"))
 
 	// Log out from the account menu, then back in.
 	must(t, page.Click("button[popovertarget=user-menu]"))

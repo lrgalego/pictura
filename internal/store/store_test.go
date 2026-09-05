@@ -82,8 +82,20 @@ func TestUsersAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Username != "lucas" || u.CreatedAt.IsZero() {
-		t.Fatalf("user not normalized: %+v", u)
+	if u.Username != "lucas" || u.CreatedAt.IsZero() || u.Enabled {
+		t.Fatalf("user not normalized or enabled by default: %+v", u)
+	}
+	if err := s.SetUserEnabled(ctx, "LUCAS", true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserByID(ctx, u.ID); !got.Enabled {
+		t.Fatal("enable should stick")
+	}
+	if err := s.SetUserEnabled(ctx, "ghost", true); err != ErrNotFound {
+		t.Fatalf("enabling a missing user: %v", err)
+	}
+	if all, err := s.Users(ctx); err != nil || len(all) != 1 || !all[0].Enabled {
+		t.Fatalf("users: %+v %v", all, err)
 	}
 	if _, err := s.CreateUser(ctx, "LUCAS", "dup", "h"); err == nil || err.Error() != "username taken" {
 		t.Fatalf("duplicate username should be refused, got %v", err)

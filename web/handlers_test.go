@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -523,5 +524,65 @@ func TestSessionCookieIsSecureBehindTLS(t *testing.T) {
 			t.Fatalf("proto %q: no session cookie", tc.proto)
 		}
 		e.post("/logout", nil, false)
+	}
+}
+
+func TestAccountsMustBeEnabled(t *testing.T) {
+	e := newEnv(t)
+	// Signing up creates a disabled account parked on /pending.
+	resp, _ := e.post("/signup", url.Values{"username": {"newcomer"}, "password": {"correct-horse"}}, true)
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("HX-Redirect") != "/pending" {
+		t.Fatalf("signup should park on /pending: %d %s", resp.StatusCode, resp.Header.Get("HX-Redirect"))
+	}
+	resp, body := e.get("/pending")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Almost there") || !strings.Contains(body, "newcomer") {
+		t.Fatalf("pending page: %d", resp.StatusCode)
+	}
+	if strings.Contains(body, "New story") || strings.Contains(body, "Your stories") {
+		t.Fatal("a disabled account must not see app navigation")
+	}
+	for _, p := range []string{"/stories", "/stories/new", "/cast"} {
+		resp, _ = e.get(p)
+		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/pending" {
+			t.Fatalf("%s for a disabled account: %d %s", p, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+	resp, _ = e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, true)
+	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("HX-Redirect") != "/pending" {
+		t.Fatalf("htmx request from a disabled account: %d", resp.StatusCode)
+	}
+	resp, _ = e.get("/login")
+	if resp.Header.Get("Location") != "/pending" {
+		t.Fatal("auth pages send a disabled account to /pending")
+	}
+	_, body = e.get("/")
+	if strings.Contains(body, "Your stories") {
+		t.Fatal("home treats a disabled account as logged out")
+	}
+	// Logging in again still parks; enabling lets the same session through.
+	e.post("/logout", nil, false)
+	resp, _ = e.post("/login", url.Values{"username": {"newcomer"}, "password": {"correct-horse"}, "next": {"/stories/new"}}, false)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/pending" {
+		t.Fatalf("login of a disabled account: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if err := e.st.SetUserEnabled(context.Background(), "NEWCOMER", true); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ = e.get("/pending")
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/stories" {
+		t.Fatal("an enabled account leaves /pending")
+	}
+	resp, body = e.get("/stories")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Your stories") {
+		t.Fatalf("enabled account: %d", resp.StatusCode)
+	}
+	if err := e.st.SetUserEnabled(context.Background(), "nobody", true); err == nil {
+		t.Fatal("enabling an unknown account should fail")
+	}
+	// Anonymous visitors to /pending go to the login page.
+	other := &env{t: t, srv: e.srv, runner: e.runner, st: e.st, client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
+	resp, _ = other.get("/pending")
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
+		t.Fatal("anonymous /pending should go to login")
 	}
 }
