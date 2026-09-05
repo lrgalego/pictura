@@ -30,16 +30,18 @@ Flags: `--host`, `--port`, `--data` (SQLite database + generated images,
 default `./data`), `--env-file` (default `.env`), `--fake-ai` (offline
 placeholder provider, no API calls), `--health-check`.
 
-The Meta Model API key is read from `META_API_KEY`. Locally, put it in the
-gitignored `.env`:
+The Meta Model API key is read from `META_API_KEY`, which `make dev`
+resolves from 1Password for the life of the process through the committed
+`.env.dev.tpl` (an `op://` reference, never a value). Running the binary by
+hand works the same way:
 
 ```sh
-op read "op://StoryTime/meta-ai-api/credential" | sed 's/^/META_API_KEY=/' > .env
+op run --env-file=.env.dev.tpl -- ./bin/server --host 0.0.0.0 --port 8787 --data ./data
 ```
 
-or run under 1Password: `op run --env-file=.env.dev.tpl -- make dev`. Without
-a key the server starts in placeholder-art mode so the whole workflow can be
-exercised for free.
+In production `shipyard deploy` resolves `.env.production.tpl` the same way
+and streams the value to the machine. Without a key the server starts in
+placeholder-art mode so the whole workflow can be exercised for free.
 
 Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.
 

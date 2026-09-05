@@ -1,8 +1,10 @@
 # App-specific targets; the scaffolded Makefile -includes this file.
 
 # Local server reachable from other devices on the network (phone testing).
+# The Meta API key is resolved from 1Password for the lifetime of the process
+# (see .env.dev.tpl); nothing is written to disk.
 dev: generate
-	$(GO) run ./cmd/server --host 0.0.0.0 --port $(PORT) --data ./data
+	op run --env-file=.env.dev.tpl -- $(GO) run ./cmd/server --host 0.0.0.0 --port $(PORT) --data ./data
 
 # Same, but never touches the Meta API (placeholder art).
 dev-fake: generate

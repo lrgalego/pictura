@@ -9,7 +9,7 @@
 # One variable per line. The first variable doubles as the sentinel shipyard
 # uses to detect that resolution happened. Example:
 #
-META_API_KEY=op://StoryTime/meta-ai-api/credential
+META_API_KEY=op://pictura/meta-ai-api/credential
 #
 # The registry read token (docker login for ghcr.io/lrgalego/story-time) resolves the
 # same way — create the item, then keep this line:
