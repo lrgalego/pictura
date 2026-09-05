@@ -1,5 +1,5 @@
 {
-  description = "story-time — dev environment";
+  description = "pictura — dev environment";
 
   inputs = {
     # unstable, because go.mod requires >= 1.26.1 and stable channels lag.
@@ -62,7 +62,7 @@
 
           # Kept cheap on purpose — this runs on every shell entry.
           shellHook = ''
-            echo "story-time dev shell · $(go version | cut -d' ' -f3)"
+            echo "pictura dev shell · $(go version | cut -d' ' -f3)"
             echo "  make doctor  — verify the toolchain"
           '';
         };

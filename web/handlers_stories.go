@@ -13,11 +13,11 @@ import (
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 
-	"github.com/lrgalego/story-time/internal/jobs"
-	"github.com/lrgalego/story-time/internal/pdf"
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
-	"github.com/lrgalego/story-time/web/views"
+	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/pdf"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/web/views"
 )
 
 // ---------- library & step 1 ----------

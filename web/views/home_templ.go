@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"github.com/lrgalego/htmx-ds/components"
 
-	"github.com/lrgalego/story-time/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
 
 // Home is the landing page.
@@ -36,7 +36,7 @@ func Home(loggedIn bool) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<section class=\"hero\"><div class=\"wrap hero__grid\"><div><h1>Paste a script.<br>Get a comic.</h1><p class=\"hero__lede\">Story Time reads your story, designs the cast, storyboards every page and draws the whole book. You approve each step and change anything you like.</p><div class=\"hero__cta\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<section class=\"hero\"><div class=\"wrap hero__grid\"><div><h1>Paste a script.<br>Get a comic.</h1><p class=\"hero__lede\">Pictura reads your story, designs the cast, storyboards every page and draws the whole book. You approve each step and change anything you like.</p><div class=\"hero__cta\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

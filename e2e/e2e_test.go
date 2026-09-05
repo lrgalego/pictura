@@ -25,10 +25,10 @@ import (
 
 	"github.com/playwright-community/playwright-go"
 
-	"github.com/lrgalego/story-time/internal/jobs"
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
-	"github.com/lrgalego/story-time/web"
+	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/web"
 )
 
 const script = `THE LIGHTHOUSE KEEPER'S ROBOT
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("chromium launch: %v", err)
 	}
 
-	dir, _ := os.MkdirTemp("", "story-time-e2e")
+	dir, _ := os.MkdirTemp("", "pictura-e2e")
 	st, err := store.Open(dir)
 	if err != nil {
 		log.Fatal(err)

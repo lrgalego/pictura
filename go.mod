@@ -1,4 +1,4 @@
-module github.com/lrgalego/story-time
+module github.com/lrgalego/pictura
 
 go 1.26.0
 

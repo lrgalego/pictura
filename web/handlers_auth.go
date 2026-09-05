@@ -8,8 +8,8 @@ import (
 	"github.com/lrgalego/htmx-ds/layout"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/lrgalego/story-time/internal/store"
-	"github.com/lrgalego/story-time/web/views"
+	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/web/views"
 )
 
 func (s *server) home(w http.ResponseWriter, r *http.Request) {

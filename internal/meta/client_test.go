@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lrgalego/story-time/internal/meta/metatest"
-	"github.com/lrgalego/story-time/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/meta/metatest"
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
 
 func client(s *metatest.Server) *Client {

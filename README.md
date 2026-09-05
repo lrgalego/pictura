@@ -1,6 +1,6 @@
-# Story Time
+# Pictura
 
-Paste a script, get a comic. Story Time reads a story with **Muse Spark**
+Paste a script, get a comic. Pictura reads a story with **Muse Spark**
 (`muse-spark-1.3-contributor`), designs the cast, storyboards the pages and
 draws every page with **Muse Image** (`muse-image-1.0`), with the writer
 approving and adjusting each step.
@@ -58,7 +58,7 @@ Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.
 | `web` | routes, auth, handlers; `web/views` templ pages; `web/static/app.css` the brand theme |
 
 The UI is [htmx-ds](https://github.com/lrgalego/htmx-ds) with a custom theme
-(`storytime` light/dark bound to the default `light`/`dark` slugs so the
+(`pictura` light/dark bound to the default `light`/`dark` slugs so the
 toggle works with no picker). Long model calls run in the background; step
 panels poll every two seconds while a job runs and stop when it is done.
 

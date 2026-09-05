@@ -17,7 +17,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 // Fake is an offline AI: a plausible cast and breakdown derived from the

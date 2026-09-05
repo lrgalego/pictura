@@ -2,7 +2,7 @@
 # scaffold know about this project. `shipyard help` for the commands.
 
 [app]
-name       = "story-time"
+name       = "pictura"
 binaries   = ["server:./cmd/server"]
 port       = 8080
 health     = "/healthz"
@@ -43,14 +43,14 @@ location    = "nbg1"
 server_type = "cx22"
 
 [registry]
-repo = "ghcr.io/lrgalego/story-time"
+repo = "ghcr.io/lrgalego/pictura"
 auth = "token"
 user = "lrgalego"
 
 [ingress]
 provider  = "cloudflare"
 hostname  = "pictura.fun"
-tunnel_id = "64090fde-109c-4bc2-8eba-5302fad088b1"
+tunnel_id = "f17e8a1f-a62d-4077-ac4f-c5f982fe7fb5"
 
 [secrets]
 provider = "op"

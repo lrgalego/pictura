@@ -13,7 +13,7 @@ import (
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 // ShellProps is what every full page needs from the request.
@@ -48,7 +48,7 @@ func Shell(p ShellProps, content templ.Component) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = layout.Base(layout.BaseProps{
 			Title: p.Title,
-			Brand: "Story Time",
+			Brand: "Pictura",
 			CSS:   []string{assets.CSSPath, "/static/app/app.css"},
 			Head:  head(),
 		}, body(p, content)).Render(ctx, templ_7745c5c3_Buffer)
@@ -192,7 +192,7 @@ func Topbar(p ShellProps) templ.Component {
 			templ_7745c5c3_Var5 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<header class=\"topbar\"><div class=\"wrap topbar__inner\"><a href=\"/\" class=\"brand\" aria-label=\"Story Time home\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<header class=\"topbar\"><div class=\"wrap topbar__inner\"><a href=\"/\" class=\"brand\" aria-label=\"Pictura home\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -200,7 +200,7 @@ func Topbar(p ShellProps) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span>Story Time</span></a> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span>Pictura</span></a> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -591,7 +591,7 @@ func footer() templ.Component {
 			templ_7745c5c3_Var19 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<footer class=\"wrap footer\"><span>Story Time turns scripts into comics.</span> <span>Text by Muse Spark, art by Muse Image.</span></footer>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<footer class=\"wrap footer\"><span>Pictura turns scripts into comics.</span> <span>Text by Muse Spark, art by Muse Image.</span></footer>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

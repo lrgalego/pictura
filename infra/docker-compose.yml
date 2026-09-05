@@ -1,6 +1,6 @@
-# Deployed to /opt/story-time/docker-compose.yml on the VM.
+# Deployed to /opt/pictura/docker-compose.yml on the VM.
 #
-# SHIPYARD_IMAGE comes from /opt/story-time/.env, which `shipyard deploy`
+# SHIPYARD_IMAGE comes from /opt/pictura/.env, which `shipyard deploy`
 # rewrites to a specific sha- tag. Pinning by digest-bearing tag rather than
 # :latest is what makes rollback a one-line edit plus `docker compose up -d`.
 

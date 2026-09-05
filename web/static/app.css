@@ -1,9 +1,9 @@
-/* Story Time — brand theme + product styling, layered on htmx-ds tokens. */
+/* Pictura — brand theme + product styling, layered on htmx-ds tokens. */
 
 /* ---------- theme tokens: Paper (light) and Ink (dark) ---------- */
 :root,
 [data-theme="light"],
-[data-theme="storytime-light"] {
+[data-theme="pictura-light"] {
   color-scheme: light;
   --background: #fff9ef;
   --foreground: #221b3a;
@@ -47,7 +47,7 @@
 
 .dark,
 [data-theme="dark"],
-[data-theme="storytime-dark"] {
+[data-theme="pictura-dark"] {
   color-scheme: dark;
   --background: #17132b;
   --foreground: #f6efe2;

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 // finished walks a story through every step on the fake provider.

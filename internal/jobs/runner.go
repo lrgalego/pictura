@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 // Runner is a per-story scheduler. Nothing is ever refused: work is queued

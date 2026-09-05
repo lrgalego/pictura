@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 func story() *store.Story {

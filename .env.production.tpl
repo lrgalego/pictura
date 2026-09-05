@@ -11,6 +11,6 @@
 #
 META_API_KEY=op://pictura/meta-ai-api/credential
 #
-# The registry read token (docker login for ghcr.io/lrgalego/story-time) resolves the
+# The registry read token (docker login for ghcr.io/lrgalego/pictura) resolves the
 # same way — create the item, then keep this line:
-SHIPYARD_REGISTRY_TOKEN=op://Private/story-time-registry/token
+SHIPYARD_REGISTRY_TOKEN=op://pictura/github-registry/token

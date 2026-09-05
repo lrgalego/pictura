@@ -1,4 +1,4 @@
-# Operating story-time
+# Operating pictura
 
 This project is built, shipped and operated by the **shipyard** CLI —
 `shipyard.toml` is the single source of truth, and the Makefile is an

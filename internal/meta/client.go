@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lrgalego/story-time/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
 
 const (

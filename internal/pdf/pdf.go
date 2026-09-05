@@ -56,7 +56,7 @@ func Write(w io.Writer, title string, pages []Page) error {
 	}
 	objs[0].body = []byte("<< /Type /Catalog /Pages 2 0 R >>")
 	objs[1].body = []byte(fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", kidRefs.String(), len(kids)))
-	infoObj := add([]byte(fmt.Sprintf("<< /Title (%s) /Producer (story-time) >>", escape(title))))
+	infoObj := add([]byte(fmt.Sprintf("<< /Title (%s) /Producer (pictura) >>", escape(title))))
 
 	var out bytes.Buffer
 	out.WriteString("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")

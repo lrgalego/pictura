@@ -1,9 +1,9 @@
-# Deployed to /opt/story-time/cloudflared/config.yml on the VM.
+# Deployed to /opt/pictura/cloudflared/config.yml on the VM.
 #
 # The tunnel dials out to Cloudflare, so the VM needs no inbound firewall rule
 # and no published port. `server` resolves over the compose network.
 
-tunnel: 64090fde-109c-4bc2-8eba-5302fad088b1
+tunnel: f17e8a1f-a62d-4077-ac4f-c5f982fe7fb5
 credentials-file: /etc/cloudflared/credentials.json
 
 # Keep the origin connection cheap: TLS terminates at Cloudflare's edge and the

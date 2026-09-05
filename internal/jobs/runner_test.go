@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 const script = `THE LIGHTHOUSE

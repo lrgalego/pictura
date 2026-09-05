@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lrgalego/story-time/internal/jobs"
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 const script = `THE LIGHTHOUSE KEEPER'S ROBOT
@@ -156,7 +156,7 @@ func TestHomeAndAuthPages(t *testing.T) {
 	e := newEnv(t)
 	for _, p := range []string{"/", "/login", "/signup"} {
 		resp, body := e.get(p)
-		if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Story Time") {
+		if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Pictura") {
 			t.Fatalf("%s: %d", p, resp.StatusCode)
 		}
 	}

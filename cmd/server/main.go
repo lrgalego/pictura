@@ -1,4 +1,4 @@
-// The story-time server: one binary, flag-configured, self-probing.
+// The pictura server: one binary, flag-configured, self-probing.
 //
 // --health-check exists because the production image is distroless — no shell,
 // no curl — so the container healthcheck runs this same binary against itself.
@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lrgalego/story-time/internal/jobs"
-	"github.com/lrgalego/story-time/internal/meta"
-	"github.com/lrgalego/story-time/internal/pipeline"
-	"github.com/lrgalego/story-time/internal/store"
-	"github.com/lrgalego/story-time/web"
+	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/meta"
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/web"
 )
 
 func main() {

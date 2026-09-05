@@ -18,9 +18,9 @@ import (
 	"github.com/lrgalego/htmx-ds/layout"
 	"github.com/lrgalego/htmx-ds/theme"
 
-	"github.com/lrgalego/story-time/internal/jobs"
-	"github.com/lrgalego/story-time/internal/store"
-	"github.com/lrgalego/story-time/web/views"
+	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/web/views"
 )
 
 //go:embed static

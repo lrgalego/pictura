@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lrgalego/story-time/internal/store"
+	"github.com/lrgalego/pictura/internal/store"
 )
 
 // AI is what the pipeline needs from a model provider.

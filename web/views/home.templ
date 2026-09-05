@@ -3,7 +3,7 @@ package views
 import (
 	"github.com/lrgalego/htmx-ds/components"
 
-	"github.com/lrgalego/story-time/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
 
 // Home is the landing page.
@@ -12,7 +12,7 @@ templ Home(loggedIn bool) {
 		<div class="wrap hero__grid">
 			<div>
 				<h1>Paste a script.<br/>Get a comic.</h1>
-				<p class="hero__lede">Story Time reads your story, designs the cast, storyboards every page and draws the whole book. You approve each step and change anything you like.</p>
+				<p class="hero__lede">Pictura reads your story, designs the cast, storyboards every page and draws the whole book. You approve each step and change anything you like.</p>
 				<div class="hero__cta">
 					if loggedIn {
 						@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}) {
