@@ -7,3 +7,8 @@ dev: generate
 # Same, but never touches the Meta API (placeholder art).
 dev-fake: generate
 	$(GO) run ./cmd/server --host 0.0.0.0 --port $(PORT) --data ./data --fake-ai
+
+# Browser tests (playwright-go, real Chromium): the main flows end to end on
+# the offline provider. Self-bootstraps the driver on first run.
+test-e2e:
+	$(GO) test -tags e2e ./e2e/ -count=1 -timeout 10m $(ARGS)
