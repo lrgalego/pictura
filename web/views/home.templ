@@ -1,0 +1,127 @@
+package views
+
+import (
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/story-time/internal/pipeline"
+)
+
+// Home is the landing page.
+templ Home(loggedIn bool) {
+	<section class="hero">
+		<div class="wrap hero__grid">
+			<div>
+				<h1>Paste a script.<br/>Get a comic.</h1>
+				<p class="hero__lede">Story Time reads your story, designs the cast, storyboards every page and draws the whole book. You approve each step and change anything you like.</p>
+				<div class="hero__cta">
+					if loggedIn {
+						@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}) {
+							Start a story
+						}
+						@components.LinkButton(components.LinkButtonProps{Href: "/stories", Variant: components.ButtonOutline, Size: components.SizeLg}) {
+							Your stories
+						}
+					} else {
+						@components.LinkButton(components.LinkButtonProps{Href: "/signup", Size: components.SizeLg}) {
+							Start a story
+						}
+						@components.LinkButton(components.LinkButtonProps{Href: "#how", Variant: components.ButtonOutline, Size: components.SizeLg}) {
+							See how it works
+						}
+					}
+				</div>
+				<p class="hero__note">Four steps from script to book. Download it as a PDF when you love it.</p>
+			</div>
+			<div class="strip" aria-hidden="true">
+				<div class="panel strip__panel panel--pop">
+					<span class="strip__label">Your script</span>
+					<pre class="strip__script">INT. LIGHTHOUSE. NIGHT.
+MARA: Did you hear that?
+PIP (whirring): I hear everything.</pre>
+				</div>
+				<div class="panel strip__panel panel--pop3">
+					<span class="strip__label">Your cast</span>
+					<div class="strip__cast">
+						<span class="strip__face">🧒</span>
+						<span class="strip__face">🤖</span>
+						<span class="strip__face">🕵️</span>
+					</div>
+					<span class="bubble">Who's there?</span>
+				</div>
+				<div class="panel strip__panel">
+					<span class="strip__label">Your comic</span>
+					<div class="strip__grid">
+						<div class="strip__cell"></div>
+						<div class="strip__cell"></div>
+						<div class="strip__cell"></div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+	<section class="section" id="how">
+		<div class="wrap">
+			<h2 class="section__title">How it works</h2>
+			<p class="section__lede">Each step waits for you. Ask for changes in plain words and the editor or the artist redoes just that part.</p>
+			<div class="steps">
+				<div class="panel step">
+					<div class="step__glyph">📜</div>
+					<h3>Paste your script</h3>
+					<p>Screenplay, prose, a bedtime story you made up. Pick the look: comic, manga, storybook and more.</p>
+				</div>
+				<div class="panel step">
+					<div class="step__glyph">🎭</div>
+					<h3>Meet your cast</h3>
+					<p>Every character gets a written description and a drawn model sheet: faces, poses, outfit, props.</p>
+				</div>
+				<div class="panel step">
+					<div class="step__glyph">🎬</div>
+					<h3>Approve the storyboard</h3>
+					<p>The story is broken into pages and panels, with shots and dialogue. Tweak a page or the whole plan.</p>
+				</div>
+				<div class="panel step">
+					<div class="step__glyph">📖</div>
+					<h3>Read your comic</h3>
+					<p>Pages are drawn from the sheets so the cast stays on-model. Redraw any page, then download the book.</p>
+				</div>
+			</div>
+		</div>
+	</section>
+	<section class="section">
+		<div class="wrap">
+			<h2 class="section__title">Pick a look</h2>
+			<p class="section__lede">One choice shapes the sheets and every page after them. You can change it later and redraw.</p>
+			<div class="styles">
+				for _, s := range pipeline.Styles {
+					<div class="style-tile">
+						<span class="style-tile__emoji">{ s.Emoji }</span>
+						<span>
+							<span class="style-tile__name">{ s.Name }</span>
+							<br/>
+							<span class="style-tile__blurb">{ s.Blurb }</span>
+						</span>
+					</div>
+				}
+			</div>
+		</div>
+	</section>
+	<section class="section">
+		<div class="wrap">
+			<div class="panel panel--pop cta-band">
+				<div>
+					<h2>Got a story in a drawer?</h2>
+					<p class="note" style="color:#3a2a00">It takes a few minutes to see it drawn.</p>
+				</div>
+				if loggedIn {
+					@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}) {
+						New story
+					}
+				} else {
+					@components.LinkButton(components.LinkButtonProps{Href: "/signup", Size: components.SizeLg}) {
+						Create a free account
+					}
+				}
+			</div>
+		</div>
+	</section>
+}

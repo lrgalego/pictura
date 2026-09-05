@@ -1,0 +1,74 @@
+package views
+
+import "github.com/lrgalego/htmx-ds/components"
+
+// AuthForm carries login/signup values and per-field errors.
+type AuthForm struct {
+	Username    string
+	DisplayName string
+	Password    string
+	Next        string
+	Errors      map[string]string
+}
+
+templ Login(f AuthForm) {
+	<section class="auth">
+		<div class="wrap">
+			<div class="panel auth__card">
+				<h1>Welcome back</h1>
+				<p class="auth__lede">Your stories are where you left them.</p>
+				<form class="form" method="post" action="/login" hx-post="/login" hx-swap="none">
+					<input type="hidden" name="next" value={ f.Next }/>
+					@LoginFields(f, false)
+					<div class="form__actions">
+						@components.Button(components.ButtonProps{Type: "submit"}) {
+							Log in
+						}
+					</div>
+				</form>
+				<p class="auth__alt">New here? <a href="/signup">Create an account</a>.</p>
+			</div>
+		</div>
+	</section>
+}
+
+templ LoginFields(f AuthForm, oob bool) {
+	@components.Field(components.FieldProps{ID: "f-username", Label: "Username", For: "username", Error: f.Errors["username"], OOB: oob}) {
+		@components.Input(components.InputProps{ID: "username", Name: "username", Value: f.Username, Invalid: f.Errors["username"] != "", Attrs: templ.Attributes{"autocomplete": "username", "autocapitalize": "none", "required": true, "autofocus": f.Username == ""}})
+	}
+	@components.Field(components.FieldProps{ID: "f-password", Label: "Password", For: "password", Error: f.Errors["password"], OOB: oob}) {
+		@components.Input(components.InputProps{ID: "password", Type: "password", Name: "password", Invalid: f.Errors["password"] != "", Attrs: templ.Attributes{"autocomplete": "current-password", "required": true}})
+	}
+}
+
+templ Signup(f AuthForm) {
+	<section class="auth">
+		<div class="wrap">
+			<div class="panel auth__card">
+				<h1>Create your account</h1>
+				<p class="auth__lede">A username and a password. That's the whole form.</p>
+				<form class="form" method="post" action="/signup" hx-post="/signup" hx-swap="none">
+					@SignupFields(f, false)
+					<div class="form__actions">
+						@components.Button(components.ButtonProps{Type: "submit"}) {
+							Create account
+						}
+					</div>
+				</form>
+				<p class="auth__alt">Already have one? <a href="/login">Log in</a>.</p>
+			</div>
+		</div>
+	</section>
+}
+
+templ SignupFields(f AuthForm, oob bool) {
+	@components.Field(components.FieldProps{ID: "f-username", Label: "Username", For: "username", Error: f.Errors["username"], Help: "Lowercase letters, numbers, dots, dashes or underscores.", OOB: oob}) {
+		@components.Input(components.InputProps{ID: "username", Name: "username", Value: f.Username, Invalid: f.Errors["username"] != "", Attrs: templ.Attributes{"autocomplete": "username", "autocapitalize": "none", "required": true}})
+	}
+	@components.Field(components.FieldProps{ID: "f-display-name", Label: "Name to show", For: "display_name", Help: "Optional. Defaults to your username.", OOB: oob}) {
+		@components.Input(components.InputProps{ID: "display_name", Name: "display_name", Value: f.DisplayName, Attrs: templ.Attributes{"autocomplete": "name"}})
+	}
+	@components.Field(components.FieldProps{ID: "f-password", Label: "Password", For: "password", Error: f.Errors["password"], Help: "At least 8 characters.", OOB: oob}) {
+		@components.Input(components.InputProps{ID: "password", Type: "password", Name: "password", Invalid: f.Errors["password"] != "", Attrs: templ.Attributes{"autocomplete": "new-password", "required": true}})
+	}
+}

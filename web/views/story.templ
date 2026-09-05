@@ -1,0 +1,1007 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/story-time/internal/jobs"
+	"github.com/lrgalego/story-time/internal/pipeline"
+	"github.com/lrgalego/story-time/internal/store"
+)
+
+// ---------- library ----------
+
+// StoryCard is one shelf entry.
+type StoryCard struct {
+	Story      *store.Story
+	URL        string
+	Cover      string
+	Pages      int
+	Rendered   int
+	Characters int
+	Working    bool
+}
+
+templ Library(cards []StoryCard) {
+	<div class="wrap">
+		<div class="page-head">
+			<div>
+				<h1>Your stories</h1>
+				<p>Every script you've turned into a comic, and the ones still in the works.</p>
+			</div>
+			@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}) {
+				@components.IconPlus()
+				New story
+			}
+		</div>
+		if len(cards) == 0 {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "No stories yet", Description: "Paste a script and meet your cast in about a minute."}) {
+					@components.LinkButton(components.LinkButtonProps{Href: "/stories/new"}) {
+						Start your first story
+					}
+				}
+			</div>
+		} else {
+			<div class="shelf">
+				for _, c := range cards {
+					@storyCard(c)
+				}
+				<a href="/stories/new" class="panel book book--new">
+					<span class="book__plus">+</span>
+					<span class="book__title">New story</span>
+				</a>
+			</div>
+		}
+	</div>
+}
+
+templ storyCard(c StoryCard) {
+	<a href={ c.URL } class="panel book">
+		<div class="book__cover">
+			if c.Cover != "" {
+				<img src={ c.Cover } alt="" loading="lazy"/>
+			} else {
+				<div class="book__blank">{ pipeline.StyleBySlug(c.Story.Style).Emoji }</div>
+			}
+		</div>
+		<div class="book__body">
+			<span class="book__title">{ titleOr(c.Story) }</span>
+			<div class="book__meta">
+				@components.Badge(components.BadgeSecondary, nil) {
+					{ stepLabel(c.Story.Step) }
+				}
+				<span>{ pipeline.StyleBySlug(c.Story.Style).Name }</span>
+				if c.Rendered > 0 {
+					<span>{ plural(c.Rendered, "page drawn", "pages drawn") }</span>
+				}
+				if c.Working {
+					<span class="working">
+						@components.Spinner("sm", "")
+						working
+					</span>
+				}
+			</div>
+			if c.Story.Logline != "" {
+				<p class="book__logline">{ c.Story.Logline }</p>
+			}
+		</div>
+	</a>
+}
+
+// ---------- step 1: script ----------
+
+// ScriptFormData is the new-story / edit-script form.
+type ScriptFormData struct {
+	Story  *store.Story
+	Title  string
+	Script string
+	Style  string
+	Error  string
+}
+
+templ ScriptForm(f ScriptFormData) {
+	<div class="wrap">
+		if f.Story == nil {
+			<div class="page-head">
+				<div>
+					<h1>New story</h1>
+					<p>Paste your script, pick a look, and meet your cast.</p>
+				</div>
+			</div>
+		} else {
+			<p class="note">Changing the script or the look sends it back to the editor: the cast is found again and the pages are re-planned.</p>
+		}
+		<form class="form script-form" method="post" action={ scriptAction(f) }>
+			if f.Error != "" {
+				@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "Not quite yet"}) {
+					{ f.Error }
+				}
+			}
+			@components.Field(components.FieldProps{ID: "f-title", Label: "Title", For: "title", Help: "Leave it blank and the editor names the story from the script."}) {
+				@components.Input(components.InputProps{ID: "title", Name: "title", Value: f.Title, Placeholder: "The Lighthouse Keeper's Robot"})
+			}
+			<fieldset class="form">
+				<legend class="label">Look</legend>
+				<div class="styles">
+					for _, s := range pipeline.Styles {
+						<label class="style-tile">
+							<input type="radio" name="style" value={ s.Slug } checked?={ s.Slug == f.Style }/>
+							<span class="style-tile__emoji">{ s.Emoji }</span>
+							<span>
+								<span class="style-tile__name">{ s.Name }</span>
+								<br/>
+								<span class="style-tile__blurb">{ s.Blurb }</span>
+							</span>
+						</label>
+					}
+				</div>
+			</fieldset>
+			@components.Field(components.FieldProps{ID: "f-script", Label: "Script", For: "script", Help: "Screenplay format, prose, a bedtime story: anything with characters and scenes."}) {
+				@components.Textarea(components.TextareaProps{ID: "script", Name: "script", Value: f.Script, Rows: 18, Placeholder: "INT. LIGHTHOUSE. NIGHT.\n\nMARA (9, raincoat two sizes too big) climbs the last step. Something whirs in the dark.\n\nMARA: Hello?\nPIP: Please don't scream. I'm very easy to dent."})
+			}
+			<div class="form__actions">
+				@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeLg}) {
+					if f.Story == nil {
+						Find my characters
+					} else {
+						Save and read it again
+					}
+				}
+				if f.Story != nil {
+					@components.LinkButton(components.LinkButtonProps{Href: stepHref(f.Story, f.Story.Step), Variant: components.ButtonGhost, Size: components.SizeLg}) {
+						Cancel
+					}
+				}
+			</div>
+		</form>
+	</div>
+}
+
+templ DeleteDialog(st *store.Story) {
+	@components.Dialog(components.DialogProps{Title: "Delete this story?", Description: "The script, the cast and every drawn page go with it. There is no undo."}) {
+		<form method="post" action={ base(st) + "/delete" }>
+			<div class="dialog-actions">
+				@cancelButton("Keep it")
+				@components.Button(components.ButtonProps{Type: "submit", Variant: components.ButtonDestructive}) {
+					Delete story
+				}
+			</div>
+		</form>
+	}
+}
+
+// ---------- story shell + stepper ----------
+
+templ StoryShell(st *store.Story, step int, content templ.Component) {
+	<div class="wrap">
+		<div class="story-head">
+			<div>
+				<h1>{ titleOr(st) }</h1>
+				if st.Logline != "" {
+					<p class="story-head__logline">{ st.Logline }</p>
+				}
+				<div class="story-head__meta">
+					@components.Badge(components.BadgeSecondary, nil) {
+						{ pipeline.StyleBySlug(st.Style).Emoji + " " + pipeline.StyleBySlug(st.Style).Name }
+					}
+					<span class="note">{ "Updated " + st.UpdatedAt.Local().Format("Jan 2, 15:04") }</span>
+				</div>
+			</div>
+			<div class="story-head__actions">
+				@components.LinkButton(components.LinkButtonProps{Href: base(st) + "/script", Variant: components.ButtonOutline, Size: components.SizeSm}) {
+					@components.IconPencil()
+					Edit script
+				}
+				@components.DialogTrigger(components.DialogTriggerProps{URL: base(st) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm}}) {
+					@components.IconTrash()
+					Delete
+				}
+			</div>
+		</div>
+		@stepper(st, step)
+		@content
+	</div>
+}
+
+templ stepper(st *store.Story, current int) {
+	<ol class="stepper" aria-label="Progress">
+		@stepItem(st, 1, "Script", current)
+		@stepItem(st, 2, "Characters", current)
+		@stepItem(st, 3, "Pages", current)
+		@stepItem(st, 4, "Comic", current)
+	</ol>
+}
+
+templ stepItem(st *store.Story, n int, label string, current int) {
+	<li>
+		if n == current {
+			<span class="stepper__item stepper__item--current" aria-current="step">
+				<span class="stepper__num">{ strconv.Itoa(n) }</span>
+				<span class="stepper__label">{ label }</span>
+			</span>
+		} else if n <= st.Step || n == 1 {
+			<a href={ stepHref(st, n) } class={ "stepper__item", templ.KV("stepper__item--done", n < current) }>
+				<span class="stepper__num">
+					if n < current {
+						@components.IconCheck()
+					} else {
+						{ strconv.Itoa(n) }
+					}
+				</span>
+				<span class="stepper__label">{ label }</span>
+			</a>
+		} else {
+			<span class="stepper__item">
+				<span class="stepper__num">{ strconv.Itoa(n) }</span>
+				<span class="stepper__label">{ label }</span>
+			</span>
+		}
+	</li>
+}
+
+// ---------- jobs ----------
+
+templ JobBar(j *store.Job) {
+	if j.Running() {
+		<div class="panel panel--soft job" role="status">
+			<div class="job__row">
+				@components.Spinner("", "")
+				<span class="job__title">{ j.Message }</span>
+				<span class="job__time">{ jobs.Elapsed(j).String() }</span>
+			</div>
+			if j.Total > 0 {
+				@components.Progress(components.ProgressProps{Value: j.Progress, Max: j.Total})
+			}
+			<span class="job__hint">This page updates itself. You can leave and come back; the work keeps going.</span>
+		</div>
+	} else if j != nil && j.Status == store.JobError {
+		<div class="job">
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "The last step failed"}) {
+				{ j.Error }
+			}
+		</div>
+	}
+}
+
+// stepPanel is the polled region: while a job runs it refetches itself.
+templ stepPanel(pollURL string, running bool) {
+	if running {
+		<div id="step-panel" hx-get={ pollURL } hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+			{ children... }
+		</div>
+	} else {
+		<div id="step-panel">
+			{ children... }
+		</div>
+	}
+}
+
+// ---------- feedback dialogs ----------
+
+// FeedbackDialogProps configures the "ask for changes" modal.
+type FeedbackDialogProps struct {
+	Title       string
+	Description string
+	Placeholder string
+	Action      string
+	Target      string
+	Submit      string
+	Optional    bool
+	Files       bool   // offer reference image uploads
+	FilesHelp   string // help text under the file input
+}
+
+templ FeedbackDialog(p FeedbackDialogProps) {
+	@components.Dialog(components.DialogProps{Title: p.Title, Description: p.Description}) {
+		<form class="form" hx-post={ p.Action } hx-target={ p.Target } hx-swap="outerHTML" enctype="multipart/form-data">
+			@FeedbackField("", p.Placeholder, "", false)
+			if p.Files {
+				@components.FileUpload(components.FileUploadProps{ID: "references", Name: "references", Accept: "image/*", Multiple: true, Label: "Reference images (optional)", Help: p.FilesHelp})
+			}
+			<div class="dialog-actions">
+				@cancelButton("Cancel")
+				@components.Button(components.ButtonProps{Type: "submit"}) {
+					{ p.Submit }
+				}
+			</div>
+		</form>
+	}
+}
+
+templ FeedbackField(value, placeholder, err string, oob bool) {
+	@components.Field(components.FieldProps{ID: "f-feedback", Label: "What should change?", For: "feedback", Error: err, OOB: oob}) {
+		@components.Textarea(components.TextareaProps{ID: "feedback", Name: "feedback", Value: value, Rows: 4, Placeholder: orPlaceholder(placeholder), Invalid: err != "", Attrs: templ.Attributes{"autofocus": true}})
+	}
+}
+
+func orPlaceholder(p string) string {
+	if p == "" {
+		return "Say it the way you'd tell a colleague."
+	}
+	return p
+}
+
+// ---------- step 2: characters ----------
+
+// CharactersView is everything the cast step renders.
+type CharactersView struct {
+	Story      *store.Story
+	Characters []*store.Character
+	Job        *store.Job
+	Refs        []*store.Ref
+	PageCount   int
+	AllReady    bool                          // every sheet is drawn: storyboarding may start
+	Suggestions map[int64][]store.LibraryEntry // per character without a sheet: same-named characters from other stories
+	Lineage     map[int64][]*store.Story       // per character: other stories it also appears in
+}
+
+templ CharactersStep(v CharactersView) {
+	@CharactersPanel(v)
+}
+
+templ CharactersPanel(v CharactersView) {
+	@stepPanel(base(v.Story)+"/characters/panel", v.Job.Running()) {
+		if v.Job != nil {
+			@JobBar(v.Job)
+		}
+		if len(v.Characters) == 0 && v.Job.Running() {
+			@skeletonCast()
+		}
+		if len(v.Characters) == 0 && !v.Job.Running() {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "No cast yet", Description: "The editor could not find characters. Check the script and try again."}) {
+					@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/script"}) {
+						Edit the script
+					}
+				}
+			</div>
+		} else if len(v.Characters) > 0 {
+			@castToolbar(v, false)
+			<div class="cast">
+				for _, c := range v.Characters {
+					@characterCard(v.Story, c, refsFor(v.Refs, c.ID), v.Job.Running(), v.Suggestions[c.ID], v.Lineage[c.ID])
+				}
+			</div>
+			@castToolbar(v, true)
+		}
+	}
+}
+
+templ castToolbar(v CharactersView, bottom bool) {
+	<div class={ "toolbar", templ.KV("toolbar--bottom", bottom) }>
+		if !bottom {
+			if v.AllReady {
+				<span class="note">{ plural(len(v.Characters), "character", "characters") + " in the cast. Check the looks, ask for changes, then storyboard." }</span>
+			} else {
+				<span class="note">{ plural(len(v.Characters), "character", "characters") + " found. Attach references, reuse characters from other stories, then draw the sheets." }</span>
+			}
+		}
+		<span class="toolbar__spacer"></span>
+		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/characters/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Running()}}) {
+			@components.IconPencil()
+			Adjust the cast
+		}
+		if v.AllReady {
+			<form hx-post={ base(v.Story) + "/characters/approve" } hx-target="#step-panel" hx-swap="outerHTML">
+				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Running()}) {
+					if v.PageCount > 0 {
+						Storyboard again
+					} else {
+						Storyboard the pages
+					}
+					@components.IconArrowRight()
+				}
+			</form>
+		} else {
+			@components.Button(components.ButtonProps{Disabled: v.Job.Running(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/characters/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+				@components.IconPalette()
+				if readySheets(v.Characters) > 0 {
+					Draw the remaining sheets
+				} else {
+					Draw the character sheets
+				}
+			}
+		}
+	</div>
+}
+
+templ characterCard(st *store.Story, c *store.Character, refs []*store.Ref, busy bool, matches []store.LibraryEntry, alsoIn []*store.Story) {
+	<article class="panel char" id={ fmt.Sprintf("char-%d", c.ID) }>
+		<div class={ "char__sheet", templ.KV("char__sheet--idle", c.SheetStatus == store.ImagePending) }>
+			if c.SheetStatus == store.ImagePending {
+				<div class="char__state char__state--idle">
+					<span class="char__initial">{ initials(c.Name) }</span>
+					<span class="char__state-msg">Sheet not drawn yet</span>
+				</div>
+			} else {
+				@sheetState(st, c)
+			}
+		</div>
+		if len(matches) > 0 && !busy {
+			@suggestionBox(st, c, matches)
+		}
+		@characterBody(st, c, refs, busy, c.SheetStatus != store.ImagePending, alsoIn)
+	</article>
+}
+
+// suggestionBox offers same-named characters from the writer's other stories.
+templ suggestionBox(st *store.Story, c *store.Character, matches []store.LibraryEntry) {
+	<div class="suggest">
+		for _, m := range matches {
+			<div class="suggest__row">
+				if m.Character.SheetStatus == store.ImageReady {
+					<img class="suggest__img" src={ "/media/t/" + m.Character.SheetImage } alt=""/>
+				} else {
+					<span class="suggest__img suggest__img--blank">{ initials(m.Character.Name) }</span>
+				}
+				<div class="suggest__text">
+					<b>{ "Same " + m.Character.Name + " as in " + titleOr(m.Story) + "?" }</b>
+					<span class="note">
+						if m.Character.SheetStatus == store.ImageReady {
+							Reuse the look and the finished sheet. No redraw needed.
+						} else {
+							Reuse the look; the sheet still needs drawing.
+						}
+					</span>
+				</div>
+				<form hx-post={ fmt.Sprintf("%s/characters/%d/link", base(st), c.ID) } hx-target="#step-panel" hx-swap="outerHTML">
+					<input type="hidden" name="source" value={ strconv.FormatInt(m.Character.ID, 10) }/>
+					@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm}) {
+						Yes, use this one
+					}
+				</form>
+			</div>
+		}
+	</div>
+}
+
+templ sheetState(st *store.Story, c *store.Character) {
+			switch c.SheetStatus {
+				case store.ImageReady:
+					<button type="button" class="char__sheet-btn" hx-get={ fmt.Sprintf("%s/characters/%d/view", base(st), c.ID) } hx-target="#modal-root" aria-label={ "Open " + c.Name + "'s sheet" }>
+						<img src={ "/media/t/" + c.SheetImage } alt={ c.Name + " character sheet" } loading="lazy"/>
+					</button>
+				case store.ImageGenerating:
+					<div class="char__state char__state--busy">
+						<div>
+							@components.Spinner("lg", "")
+							<div class="char__state-msg">Drawing the sheet</div>
+						</div>
+					</div>
+				case store.ImageError:
+					<div class="char__state">
+						<div>
+							@components.IconAlertTriangle()
+							<div class="char__state-msg">The sheet failed</div>
+							<div class="note">{ c.SheetError }</div>
+						</div>
+					</div>
+				default:
+					<div class="char__state char__state--busy">
+						<div class="char__state-msg">Waiting to be drawn</div>
+					</div>
+			}
+}
+
+templ characterBody(st *store.Story, c *store.Character, refs []*store.Ref, busy bool, art bool, alsoIn []*store.Story) {
+		<div class="char__body">
+			<h2 class="char__name">{ c.Name }</h2>
+			if len(alsoIn) > 0 {
+				<p class="lineage">
+					@components.IconHistory()
+					Also in
+					for i, o := range alsoIn {
+						if i > 0 {
+							,
+						}
+						<a href={ base(o) + "/characters" }>{ titleOr(o) }</a>
+					}
+				</p>
+			}
+			<div class="char__tags">
+				if c.Role != "" {
+					@components.Badge(components.BadgeSecondary, nil) {
+						{ c.Role }
+					}
+				}
+				if c.Age != "" {
+					@components.Badge(components.BadgeOutline, nil) {
+						{ c.Age }
+					}
+				}
+			</div>
+			<p class="char__desc">{ c.Visual }</p>
+			<dl>
+				<dt>Wears</dt>
+				<dd>{ c.Wardrobe }</dd>
+				<dt>Carries</dt>
+				<dd>{ c.Items }</dd>
+			</dl>
+			<details>
+				<summary>Personality</summary>
+				<p class="char__desc">{ c.Personality }</p>
+			</details>
+			<div class="char__refs">
+				if len(refs) > 0 {
+					<span class="note">{ plural(len(refs), "reference image", "reference images") }</span>
+					@refStrip(st, refs, busy, true)
+				}
+				<form class="ref-upload" hx-post={ fmt.Sprintf("%s/characters/%d/refs", base(st), c.ID) } hx-target="#step-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+					<label class="ref-upload__pick btn btn--outline btn--sm">
+						@components.IconPlus()
+						if len(refs) > 0 {
+							Add reference images
+						} else {
+							Attach reference images
+						}
+						<input type="file" name="references" accept="image/*" multiple class="visually-hidden" onchange="this.form.requestSubmit()" disabled?={ busy }/>
+					</label>
+					<span class="note">Photos, sketches, outfits, props. Up to 8.</span>
+				</form>
+				<form class="ref-upload" hx-post={ fmt.Sprintf("%s/characters/%d/sheet", base(st), c.ID) } hx-target="#step-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+					<label class="ref-upload__pick btn btn--ghost btn--sm">
+						@components.IconDownload()
+						if art {
+							Replace with my own sheet
+						} else {
+							Upload a finished sheet
+						}
+						<input type="file" name="sheet" accept="image/*" class="visually-hidden" onchange="this.form.requestSubmit()" disabled?={ busy }/>
+					</label>
+					<span class="note">Already have a model sheet? Use it as-is; nothing is drawn.</span>
+				</form>
+			</div>
+			<div class="char__actions">
+				@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/characters/%d/adjust", base(st), c.ID), Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy}}) {
+					Adjust
+				}
+				@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/characters/%d/edit", base(st), c.ID), Button: components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy}}) {
+					Edit details
+				}
+				if art {
+					@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy, Attrs: templ.Attributes{"hx-post": fmt.Sprintf("%s/characters/%d/redraw", base(st), c.ID), "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+						@components.IconRefreshCw()
+						Redraw
+					}
+				} else {
+					@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/characters/%d/link", base(st), c.ID), Button: components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy}}) {
+						@components.IconUser()
+						From another story
+					}
+				}
+			</div>
+		</div>
+}
+
+// LinkDialog lists the writer's registry so any character can be reused.
+templ LinkDialog(st *store.Story, c *store.Character, entries []store.LibraryEntry) {
+	@components.Dialog(components.DialogProps{Title: "Is " + c.Name + " someone you already have?", Description: "Pick a character from another story. The look, the references and the finished sheet are copied over, so the cast stays consistent across books."}) {
+		if len(entries) == 0 {
+			<p class="note">No characters from other stories yet. Once another story has a cast, it shows up here.</p>
+		} else {
+			<div class="link-list">
+				for _, e := range entries {
+					<div class="link-row">
+						if e.Character.SheetStatus == store.ImageReady {
+							<img class="suggest__img" src={ "/media/t/" + e.Character.SheetImage } alt=""/>
+						} else {
+							<span class="suggest__img suggest__img--blank">{ initials(e.Character.Name) }</span>
+						}
+						<div class="suggest__text">
+							<b>{ e.Character.Name }</b>
+							<span class="note">{ e.Character.Role + " in " + titleOr(e.Story) }</span>
+						</div>
+						<form hx-post={ fmt.Sprintf("%s/characters/%d/link", base(st), c.ID) } hx-target="#step-panel" hx-swap="outerHTML">
+							<input type="hidden" name="source" value={ strconv.FormatInt(e.Character.ID, 10) }/>
+							@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm, Variant: components.ButtonOutline}) {
+								Use
+							}
+						</form>
+					</div>
+				}
+			</div>
+		}
+		<div class="dialog-actions">
+			@cancelButton("Cancel")
+		</div>
+	}
+}
+
+// ---------- cast registry page ----------
+
+// CastGroup is one distinct character and the stories it appears in.
+type CastGroup struct {
+	Character *store.Character
+	Stories   []*store.Story
+}
+
+templ CastLibrary(groups []CastGroup) {
+	<div class="wrap">
+		<div class="page-head">
+			<div>
+				<h1>Your cast</h1>
+				<p>Every character you've created, across all your stories. Reuse any of them when a new script calls for a familiar face.</p>
+			</div>
+		</div>
+		if len(groups) == 0 {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "No characters yet", Description: "Characters appear here as soon as a script has been read."}) {
+					@components.LinkButton(components.LinkButtonProps{Href: "/stories/new"}) {
+						Start a story
+					}
+				}
+			</div>
+		} else {
+			<div class="castlib">
+				for _, g := range groups {
+					<article class="panel castlib__card">
+						<div class="castlib__art">
+							if g.Character.SheetStatus == store.ImageReady {
+								<img src={ "/media/t/" + g.Character.SheetImage } alt={ g.Character.Name + " character sheet" } loading="lazy"/>
+							} else {
+								<div class="char__state char__state--idle">
+									<span class="char__initial">{ initials(g.Character.Name) }</span>
+								</div>
+							}
+						</div>
+						<div class="castlib__body">
+							<h2 class="castlib__name">{ g.Character.Name }</h2>
+							<p class="char__desc">{ g.Character.Visual }</p>
+							<p class="lineage">
+								In
+								for i, o := range g.Stories {
+									if i > 0 {
+										,
+									}
+									<a href={ base(o) + "/characters" }>{ titleOr(o) }</a>
+								}
+							</p>
+						</div>
+					</article>
+				}
+			</div>
+		}
+	</div>
+}
+
+
+templ CharacterEditDialog(st *store.Story, c *store.Character) {
+	@components.Dialog(components.DialogProps{Title: "Edit " + c.Name, Description: "Change the words yourself. The sheet is redrawn if the look changed."}) {
+		<form class="form" hx-post={ fmt.Sprintf("%s/characters/%d/edit", base(st), c.ID) } hx-target="#step-panel" hx-swap="outerHTML">
+			@CharacterEditFields(c, "", false)
+			<label class="stack stack--row stack--align-center gap-2">
+				@components.Checkbox(components.CheckboxProps{ID: "redraw", Name: "redraw", Value: "1", Checked: true})
+				<span>Redraw the sheet if the look changed</span>
+			</label>
+			<div class="dialog-actions">
+				@cancelButton("Cancel")
+				@components.Button(components.ButtonProps{Type: "submit"}) {
+					Save
+				}
+			</div>
+		</form>
+	}
+}
+
+templ CharacterEditFields(c *store.Character, err string, oob bool) {
+	<div
+		id="char-edit-fields"
+		class="form"
+		if oob {
+			hx-swap-oob="outerHTML"
+		}
+	>
+		if err != "" {
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "Not saved"}) {
+				{ err }
+			}
+		}
+		<div class="grid grid--cols-1 grid--cols-md-3 gap-3">
+			@components.Field(components.FieldProps{ID: "f-name", Label: "Name", For: "name"}) {
+				@components.Input(components.InputProps{ID: "name", Name: "name", Value: c.Name, Attrs: templ.Attributes{"required": true}})
+			}
+			@components.Field(components.FieldProps{ID: "f-role", Label: "Role", For: "role"}) {
+				@components.Input(components.InputProps{ID: "role", Name: "role", Value: c.Role})
+			}
+			@components.Field(components.FieldProps{ID: "f-age", Label: "Age", For: "age"}) {
+				@components.Input(components.InputProps{ID: "age", Name: "age", Value: c.Age})
+			}
+		</div>
+		@components.Field(components.FieldProps{ID: "f-visual", Label: "Appearance", For: "visual"}) {
+			@components.Textarea(components.TextareaProps{ID: "visual", Name: "visual", Value: c.Visual, Rows: 4})
+		}
+		@components.Field(components.FieldProps{ID: "f-wardrobe", Label: "Wardrobe", For: "wardrobe"}) {
+			@components.Textarea(components.TextareaProps{ID: "wardrobe", Name: "wardrobe", Value: c.Wardrobe, Rows: 2})
+		}
+		@components.Field(components.FieldProps{ID: "f-items", Label: "Props", For: "items"}) {
+			@components.Input(components.InputProps{ID: "items", Name: "items", Value: c.Items})
+		}
+		@components.Field(components.FieldProps{ID: "f-personality", Label: "Personality", For: "personality"}) {
+			@components.Textarea(components.TextareaProps{ID: "personality", Name: "personality", Value: c.Personality, Rows: 2})
+		}
+	</div>
+}
+
+// ---------- step 3: pages ----------
+
+// PagesView serves both the breakdown step and the book step.
+type PagesView struct {
+	Story      *store.Story
+	Pages      []*store.Page
+	Characters []*store.Character
+	Job        *store.Job
+}
+
+templ PagesStep(v PagesView) {
+	@PagesPanel(v)
+}
+
+templ PagesPanel(v PagesView) {
+	@stepPanel(base(v.Story)+"/pages/panel", v.Job.Running()) {
+		if v.Job != nil {
+			@JobBar(v.Job)
+		}
+		if len(v.Pages) == 0 && !v.Job.Running() {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "No pages yet", Description: "The storyboard has not been made. Start it from the cast."}) {
+					@components.Button(components.ButtonProps{Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+						Storyboard the pages
+					}
+				}
+			</div>
+		} else if len(v.Pages) > 0 {
+			@pagesToolbar(v, false)
+			<div class="pages">
+				for _, p := range v.Pages {
+					@pageCard(v.Story, p, v.Job.Running())
+				}
+			</div>
+			@pagesToolbar(v, true)
+		}
+	}
+}
+
+templ pagesToolbar(v PagesView, bottom bool) {
+	<div class={ "toolbar", templ.KV("toolbar--bottom", bottom) }>
+		if !bottom {
+			<span class="note">{ plural(len(v.Pages), "page", "pages") + ", " + plural(panelCount(v.Pages), "panel", "panels") + ". Read the plan, ask for changes, then draw." }</span>
+		}
+		<span class="toolbar__spacer"></span>
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Running(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+			@components.IconRefreshCw()
+			Start over
+		}
+		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/pages/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Running()}}) {
+			@components.IconPencil()
+			Adjust all pages
+		}
+		<form hx-post={ base(v.Story) + "/pages/approve" } hx-target="#step-panel" hx-swap="outerHTML">
+			@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Running()}) {
+				if readyCount(v.Pages) > 0 {
+					Draw the changed pages
+				} else {
+					Draw the pages
+				}
+				@components.IconArrowRight()
+			}
+		</form>
+	</div>
+}
+
+templ pageCard(st *store.Story, p *store.Page, busy bool) {
+	<article class="panel pg" id={ fmt.Sprintf("page-%d", p.ID) }>
+		<div class="pg__head">
+			<span class="pg__num">{ fmt.Sprintf("Page %d", p.Number) }</span>
+			if !genericTitle(p) {
+				<h2 class="pg__title">{ p.Title }</h2>
+			}
+			if p.ImageStatus == store.ImageReady {
+				@components.Badge(components.BadgeSuccess, nil) {
+					Drawn
+				}
+			} else if st.Step >= store.StepBook {
+				@components.Badge(components.BadgeOutline, nil) {
+					Will be redrawn
+				}
+			}
+			<div class="pg__actions">
+				@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/pages/%d/adjust", base(st), p.ID), Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy}}) {
+					@components.IconPencil()
+					Adjust
+				}
+			</div>
+		</div>
+		<p class="pg__summary">{ p.Summary }</p>
+		<div class="panels">
+			for _, pn := range p.Panels {
+				@panelCard(pn)
+			}
+		</div>
+	</article>
+}
+
+templ panelCard(pn store.Panel) {
+	<div class="pn">
+		<div class="pn__head">
+			<span class="pn__num">{ fmt.Sprintf("Panel %d", pn.Number) }</span>
+			if pn.Shot != "" {
+				@components.Badge(components.BadgeOutline, nil) {
+					{ pn.Shot }
+				}
+			}
+		</div>
+		<p class="pn__desc">{ pn.Description }</p>
+		if len(pn.Characters) > 0 {
+			<div class="pn__cast">
+				for _, n := range pn.Characters {
+					@components.Badge(components.BadgeSecondary, nil) {
+						{ n }
+					}
+				}
+			</div>
+		}
+		if pn.Caption != "" {
+			<div class="pn__caption">{ pn.Caption }</div>
+		}
+		for _, l := range pn.Dialogue {
+			<div class="pn__line"><b>{ l.Character }:</b> { l.Text }</div>
+		}
+	</div>
+}
+
+// ---------- step 4: the comic ----------
+
+templ BookStep(v PagesView) {
+	@BookPanel(v)
+}
+
+templ BookPanel(v PagesView) {
+	@stepPanel(base(v.Story)+"/book/panel", v.Job.Running()) {
+		if v.Job != nil {
+			@JobBar(v.Job)
+		}
+		@bookToolbar(v)
+		if len(v.Pages) == 0 {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "Nothing to draw yet", Description: "Plan the pages first."}) {
+					@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/pages"}) {
+						Go to the pages
+					}
+				}
+			</div>
+		} else {
+			<div class="book-grid">
+				for _, p := range v.Pages {
+					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Running())
+				}
+			</div>
+			<div class="toolbar toolbar--bottom">
+				<span class="note">Not happy with a page? Redraw it with notes. Want the story told differently? Adjust the plan and draw again.</span>
+				<span class="toolbar__spacer"></span>
+				@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/pages", Variant: components.ButtonOutline}) {
+					Back to the plan
+				}
+			</div>
+		}
+	}
+}
+
+templ bookToolbar(v PagesView) {
+	<div class="toolbar">
+		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
+		<span class="toolbar__spacer"></span>
+		if readyCount(v.Pages) < len(v.Pages) && !v.Job.Running() {
+			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": base(v.Story) + "/book/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+				@components.IconRefreshCw()
+				Draw the missing pages
+			}
+		}
+		if readyCount(v.Pages) > 0 {
+			<div class="downloads">
+				@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/download.pdf", Attrs: templ.Attributes{"download": true}}) {
+					@components.IconDownload()
+					Download PDF
+				}
+				@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/download.zip", Variant: components.ButtonOutline, Attrs: templ.Attributes{"download": true}}) {
+					@components.IconDownload()
+					Pages and sheets (zip)
+				}
+			</div>
+		}
+	</div>
+}
+
+templ leaf(st *store.Story, p *store.Page, idx int, busy bool) {
+	<article class="panel leaf" id={ fmt.Sprintf("leaf-%d", p.ID) }>
+		<div class="leaf__art">
+			switch p.ImageStatus {
+				case store.ImageReady:
+					<button type="button" class="char__sheet-btn" hx-get={ fmt.Sprintf("%s/book/view?img=%d", base(st), idx) } hx-target="#modal-root" aria-label={ fmt.Sprintf("Open page %d", p.Number) }>
+						<img src={ "/media/t/" + p.Image } alt={ fmt.Sprintf("Page %d: %s", p.Number, p.Title) } loading="lazy"/>
+					</button>
+				case store.ImageGenerating:
+					<div class="char__state char__state--busy">
+						<div>
+							@components.Spinner("lg", "")
+							<div class="char__state-msg">Drawing</div>
+						</div>
+					</div>
+				case store.ImageError:
+					<div class="char__state">
+						<div>
+							@components.IconAlertTriangle()
+							<div class="char__state-msg">This page failed</div>
+							<div class="note">{ p.ImageError }</div>
+						</div>
+					</div>
+				default:
+					<div class="char__state char__state--busy">
+						<div class="char__state-msg">Waiting to be drawn</div>
+					</div>
+			}
+		</div>
+		<div class="leaf__body">
+			<span class="leaf__num">{ strconv.Itoa(p.Number) }</span>
+			<span class="leaf__title" title={ p.Title }>{ p.Title }</span>
+			@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/book/%d/redraw", base(st), p.ID), Button: components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy, Attrs: templ.Attributes{"aria-label": fmt.Sprintf("Redraw page %d", p.Number)}}}) {
+				@components.IconRefreshCw()
+				Redraw
+			}
+		</div>
+	</article>
+}
+
+// skeletonCast fills the empty cast step while the editor reads.
+templ skeletonCast() {
+	<div class="skel" aria-hidden="true">
+		for range 3 {
+			<div class="panel skel__card">
+				<div class="skel__art"></div>
+				<div class="skel__body">
+					@components.Skeleton("")
+					@components.Skeleton("")
+					@components.Skeleton("")
+					@components.Skeleton("")
+				</div>
+			</div>
+		}
+	</div>
+}
+
+// cancelButton closes the modal without submitting anything.
+templ cancelButton(label string) {
+	@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Attrs: templ.Attributes{"hx-get": "/modal/close", "hx-target": "#modal-root", "hx-swap": "innerHTML swap:0.15s"}}) {
+		{ label }
+	}
+}
+
+// refStrip shows reference thumbnails with a remove control and, when a
+// cast is given, a picker that attaches the image to a character.
+templ refStrip(st *store.Story, refs []*store.Ref, busy bool, fragment bool) {
+	<div class="refs">
+		for _, r := range refs {
+			<div class="ref" id={ fmt.Sprintf("ref-%d", r.ID) }>
+				<a href={ "/media/" + r.Image } target="_blank" rel="noopener" class="ref__link">
+					<img class="ref__img" src={ "/media/t/" + r.Image } alt={ r.Filename } loading="lazy" title={ r.Note }/>
+				</a>
+				if r.Note != "" {
+					<span class="ref__note" title={ r.Note }>{ r.Note }</span>
+				}
+				if fragment {
+					<button type="button" class="ref__remove" aria-label={ "Remove " + r.Filename } hx-post={ fmt.Sprintf("%s/refs/%d/delete", base(st), r.ID) } hx-target="#step-panel" hx-swap="outerHTML">
+						@components.IconX()
+					</button>
+				} else {
+					<form method="post" action={ fmt.Sprintf("%s/refs/%d/delete", base(st), r.ID) } class="ref__remove-form">
+						<button type="submit" class="ref__remove" aria-label={ "Remove " + r.Filename }>
+							@components.IconX()
+						</button>
+					</form>
+				}
+			</div>
+		}
+	</div>
+}
