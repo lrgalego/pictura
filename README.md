@@ -63,12 +63,24 @@ panels poll every two seconds while a job runs and stop when it is done.
 ## Test
 
 ```sh
-make test
+make test          # unit + handler tests, no network, no browser
+make cover-check   # the same suite through shipyard's coverage gate (floor: 85%)
+make test-e2e      # main flows in a real Chromium via playwright-go
 ```
 
-`web/web_test.go` drives the full workflow (signup, script, cast, feedback,
-pages, drawing, downloads, isolation between users, delete) on the fake
-provider.
+Nothing in the suite calls the Meta API. `internal/meta/metatest` is a
+stand-in server built from responses recorded against the real endpoints
+(`testdata/*.json`, with the multi-megabyte image payloads replaced by a
+2x2 PNG); the client tests assert on the exact requests it receives. Every
+other layer runs on the offline `pipeline.Fake` provider. The web tests wrap
+it in a gate that can hold model calls open, so "still working" states are
+tested deterministically instead of racing a job that finishes instantly.
+
+`e2e/` (build tag `e2e`) drives signup and login, the whole script → cast →
+sheets → storyboard → comic flow with dialogs, uploads, lightboxes and the
+PDF download, reusing characters across stories, uploading a finished sheet,
+and a mobile overflow check. It self-bootstraps the Chromium driver on first
+run.
 
 ## Deploy
 

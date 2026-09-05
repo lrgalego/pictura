@@ -13,7 +13,7 @@ SHIPYARD ?= shipyard
 TEMPL ?= $(GO) tool templ
 PORT ?= 8080
 COVER_PROFILE ?= coverage.out
-COVER_MIN ?= 0
+COVER_MIN ?= 85
 
 .PHONY: all setup doctor deploy deploy-status ssh test cover-check build clean generate run-server
 
@@ -43,7 +43,7 @@ test:
 # package; -count=1 because a cached result replays stale block layouts from
 # unrelated packages (a phantom drop that reads exactly like a regression).
 COVER_FLAGS = -coverpkg=./... -count=1
-COVER_FILTER = awk 'NR==1 && /^mode:/ {print; next} {key=$$1; if ($$NF+0 >= max[key]+0) { max[key]=$$NF; line[key]=$$0 }} END {for (k in line) print line[k]}' $(COVER_PROFILE) | grep -v -e '_templ\.go:' > $(COVER_PROFILE).tmp && mv $(COVER_PROFILE).tmp $(COVER_PROFILE)
+COVER_FILTER = awk 'NR==1 && /^mode:/ {print; next} {key=$$1; if ($$NF+0 >= max[key]+0) { max[key]=$$NF; line[key]=$$0 }} END {for (k in line) print line[k]}' $(COVER_PROFILE) | grep -v -e '_templ\.go:' -e '/cmd/server/main.go' > $(COVER_PROFILE).tmp && mv $(COVER_PROFILE).tmp $(COVER_PROFILE)
 
 cover-check:
 	$(GO) test ./... $(COVER_FLAGS) -coverprofile=$(COVER_PROFILE)

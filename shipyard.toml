@@ -15,7 +15,8 @@ private_modules = ["github.com/lrgalego"]
 htmx_ds = "v0.9.1"
 
 [gate]
-coverage_min = 0
+coverage_min = 85
+coverage_exclude = ["/cmd/server/main.go"]
 
 # The machine this app deploys to. In shared mode, other apps declare the
 # same [machine] tables and stay mutually ignorant of each other.

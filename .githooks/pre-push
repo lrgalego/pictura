@@ -68,6 +68,11 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
 			status=1
 			continue
 		fi
+		echo "pre-push: checking coverage..." >&2
+		if ! make cover-check >/dev/null 2>&1; then
+			printf '\n  refusing to push to main: coverage below threshold. Run `make cover-check`.\n\n' >&2
+			status=1
+		fi
 		continue
 	fi
 
