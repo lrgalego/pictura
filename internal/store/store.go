@@ -952,9 +952,10 @@ func scanRef(row scanner) (*Ref, error) {
 }
 
 // InsertRef stores an uploaded reference. The bytes are normalized to a
-// PNG no wider than 1600px so every downstream call speaks one format.
-func (s *Store) InsertRef(ctx context.Context, storyID, characterID int64, filename, note string, data []byte) (*Ref, error) {
-	normalized, err := NormalizeImage(data, 1600)
+// PNG no larger than maxSide on the long edge so every downstream call
+// speaks one format and storage stays small.
+func (s *Store) InsertRef(ctx context.Context, storyID, characterID int64, filename, note string, data []byte, maxSide int) (*Ref, error) {
+	normalized, err := NormalizeImage(data, maxSide)
 	if err != nil {
 		return nil, fmt.Errorf("%s: not a readable image (PNG, JPEG, GIF or WebP)", filename)
 	}

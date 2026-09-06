@@ -303,7 +303,7 @@ func TestDeleteHelpers(t *testing.T) {
 	_ = s.InsertCharacter(ctx, a)
 	_ = s.InsertCharacter(ctx, b)
 	_ = s.InsertPage(ctx, &Page{StoryID: st.ID, Number: 1})
-	_, _ = s.InsertRef(ctx, st.ID, a.ID, "a.png", "", testPNG(8, 8))
+	_, _ = s.InsertRef(ctx, st.ID, a.ID, "a.png", "", testPNG(8, 8), 1600)
 	if err := s.DeleteCharacter(ctx, a.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -429,11 +429,11 @@ func TestReferencesAndNormalize(t *testing.T) {
 	c := &Character{StoryID: st.ID, Name: "Pip"}
 	_ = s.InsertCharacter(ctx, c)
 
-	if _, err := s.InsertRef(ctx, st.ID, c.ID, "notes.txt", "", []byte("nope")); err == nil {
+	if _, err := s.InsertRef(ctx, st.ID, c.ID, "notes.txt", "", []byte("nope"), 1600); err == nil {
 		t.Fatal("non-image should be refused")
 	}
 	// JPEG input is normalized to PNG and downscaled.
-	r, err := s.InsertRef(ctx, st.ID, c.ID, "big.jpg", "the coat", testJPEG(3000, 1500))
+	r, err := s.InsertRef(ctx, st.ID, c.ID, "big.jpg", "the coat", testJPEG(3000, 1500), 1600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestReferencesAndNormalize(t *testing.T) {
 	if _, err := NormalizeImage([]byte("x"), 100); err == nil {
 		t.Fatal("garbage should not normalize")
 	}
-	unassigned, _ := s.InsertRef(ctx, st.ID, 0, "loose.png", "", testPNG(10, 10))
+	unassigned, _ := s.InsertRef(ctx, st.ID, 0, "loose.png", "", testPNG(10, 10), 1600)
 	refs, _ := s.Refs(ctx, st.ID)
 	if len(refs) != 2 || refs[0].CharacterID != c.ID || unassigned.CharacterID != 0 || refs[0].CreatedAt.IsZero() {
 		t.Fatalf("refs: %+v", refs)
@@ -491,8 +491,8 @@ func TestLibraryAndLink(t *testing.T) {
 	_ = s.InsertCharacter(ctx, src)
 	sheet, _ := s.SaveImage(ctx, a.ID, "png", testPNG(30, 20))
 	_ = s.SetCharacterSheet(ctx, src.ID, sheet, ImageReady, "")
-	_, _ = s.InsertRef(ctx, a.ID, src.ID, "coat.png", "the coat", testPNG(8, 8))
-	_, _ = s.InsertRef(ctx, a.ID, 0, "loose.png", "", testPNG(8, 8)) // not the character's: not copied
+	_, _ = s.InsertRef(ctx, a.ID, src.ID, "coat.png", "the coat", testPNG(8, 8), 1600)
+	_, _ = s.InsertRef(ctx, a.ID, 0, "loose.png", "", testPNG(8, 8), 1600) // not the character's: not copied
 	src, _ = s.Character(ctx, src.ID)
 
 	lib, err := s.Library(ctx, u.ID)

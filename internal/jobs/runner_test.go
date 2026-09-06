@@ -207,7 +207,7 @@ func TestReviseAndReferences(t *testing.T) {
 	_ = e.r.Analyze(e.sto.ID)
 	e.mustDone("analyze")
 	c := e.chars()[0]
-	_, _ = e.st.InsertRef(e.ctx, e.sto.ID, c.ID, "coat.png", "the coat", tinyPNG())
+	_, _ = e.st.InsertRef(e.ctx, e.sto.ID, c.ID, "coat.png", "the coat", tinyPNG(), 1600)
 
 	// Casting phase: revise only, no drawing.
 	if err := e.r.Revise(e.sto.ID, c.ID, "", true, false); err != nil {
@@ -466,7 +466,7 @@ func TestReferencesOnlyReadyOnes(t *testing.T) {
 		t.Fatal("refPNGs of nothing is nil")
 	}
 	// A ref whose file vanished is skipped, not fatal.
-	r, _ := e.st.InsertRef(e.ctx, e.sto.ID, chars[0].ID, "a.png", "", tinyPNG())
+	r, _ := e.st.InsertRef(e.ctx, e.sto.ID, chars[0].ID, "a.png", "", tinyPNG(), 1600)
 	_ = e.st.Blobs().Delete(e.ctx, r.Image)
 	pr, _, err = e.r.references(e.ctx, e.sto.ID, chars[0].ID)
 	if err != nil || len(pr) != 0 {
