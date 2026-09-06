@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
-	htmxds "github.com/lrgalego/htmx-ds"
+	"github.com/lrgalego/htmx-ds/assets"
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 	"github.com/lrgalego/htmx-ds/theme"
@@ -43,9 +43,17 @@ type server struct {
 func Router(d Deps) http.Handler {
 	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake}
 	mux := http.NewServeMux()
-	htmxds.Mount(mux)
+	// What htmxds.Mount would register, spelled out so the asset route can
+	// carry our cache policy (versioned URLs immutable, bare ones no-cache).
+	empty := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	mux.Handle("GET /static/", cacheAssets(http.StripPrefix("/static/", assets.Handler())))
+	mux.HandleFunc("GET /modal/close", empty)
+	mux.HandleFunc("GET /panel/close", empty)
+	mux.HandleFunc("GET /toasts/dismiss", empty)
+	mux.HandleFunc("POST /theme/toggle", theme.ToggleHandler)
+	mux.HandleFunc("POST /theme/set", theme.SetHandler)
 	static, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /static/app/", http.StripPrefix("/static/app/", http.FileServer(http.FS(static))))
+	mux.Handle("GET /static/app/", cacheAssets(http.StripPrefix("/static/app/", http.FileServer(http.FS(static)))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	mux.HandleFunc("GET /{$}", s.home)
@@ -190,7 +198,12 @@ func secureRequest(r *http.Request) bool {
 // ---------- helpers ----------
 
 func (s *server) shell(r *http.Request, title string) views.ShellProps {
-	return views.ShellProps{Title: title, User: userFrom(r.Context()), Fake: s.fake, Path: r.URL.Path}
+	return views.ShellProps{
+		Title: title, User: userFrom(r.Context()), Fake: s.fake, Path: r.URL.Path,
+		CSS:     []string{versioned(assets.CSSPath), versioned("/static/app/app.css")},
+		Scripts: []string{versioned(assets.HTMXPath), versioned(assets.DSJSPath)},
+		Favicon: versioned("/static/app/favicon.svg"),
+	}
 }
 
 // story loads the {id} story and checks ownership; answers 404 otherwise.

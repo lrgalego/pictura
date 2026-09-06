@@ -1,7 +1,6 @@
 package views
 
 import (
-	"github.com/lrgalego/htmx-ds/assets"
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 
@@ -10,27 +9,31 @@ import (
 
 // ShellProps is what every full page needs from the request.
 type ShellProps struct {
-	Title string
-	User  *store.User
-	Fake  bool // the offline provider is in use
-	Path  string
+	Title   string
+	User    *store.User
+	Fake    bool // the offline provider is in use
+	Path    string
+	CSS     []string // versioned stylesheet URLs, in order
+	Scripts []string // versioned script URLs
+	Favicon string
 }
 
 // Shell renders the full document: brand head, top bar, content, footer.
 templ Shell(p ShellProps, content templ.Component) {
 	@layout.Base(layout.BaseProps{
-		Title: p.Title,
-		Brand: "Pictura",
-		CSS:   []string{assets.CSSPath, "/static/app/app.css"},
-		Head:  head(),
+		Title:   p.Title,
+		Brand:   "Pictura",
+		CSS:     p.CSS,
+		Scripts: p.Scripts,
+		Head:    head(p),
 	}, body(p, content))
 }
 
-templ head() {
+templ head(p ShellProps) {
 	<link rel="preconnect" href="https://fonts.googleapis.com"/>
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 	<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet"/>
-	<link rel="icon" href="/static/app/favicon.svg" type="image/svg+xml"/>
+	<link rel="icon" href={ p.Favicon } type="image/svg+xml"/>
 	<meta name="htmx-config" content="{&quot;timeout&quot;:300000}"/>
 	<meta name="theme-color" content="#221b3a"/>
 }
