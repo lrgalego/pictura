@@ -142,81 +142,83 @@ func TestScriptEditing(t *testing.T) {
 	}
 }
 
-func TestCharacterEditDialogAndSave(t *testing.T) {
+func TestCharacterEditAndAdjust(t *testing.T) {
 	e := newEnv(t)
 	e.signup("tweaker")
 	base, _ := e.finished(t)
 	_, body := e.get(base + "/characters")
 	cid := firstCharacterID(body)
-	resp, body := e.get(base + "/characters/" + cid + "/edit")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="char-edit-fields"`) {
-		t.Fatalf("edit dialog: %d", resp.StatusCode)
+	page := base + "/characters/" + cid
+	e.target = "char-panel"
+	// The edit form replaces the description in place.
+	resp, body := e.get(page + "/edit")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `class="form details__form"`) || strings.Contains(body, "<html") {
+		t.Fatalf("edit form fragment: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {""}, "visual": {"x"}}, true)
-	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "A name and an appearance are required") {
-		t.Fatalf("invalid edit: %d", resp.StatusCode)
+	resp, body = e.post(page+"/edit", url.Values{"name": {""}, "visual": {"x"}}, true)
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "A name and a description of the looks are required") || !strings.Contains(body, `details__form`) {
+		t.Fatalf("invalid edit should re-render the form with a toast: %d", resp.StatusCode)
 	}
 	// Words-only change: saved, sheet kept.
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara"}, "role": {"lead"}, "age": {"12 years old"}, "visual": {"Small and wiry with a round face, freckles across the nose, wide hazel eyes and a mop of curly copper hair that never stays put."}, "wardrobe": {"An oversized mustard-yellow raincoat over a striped tee, rolled jeans and red rubber boots."}, "items": {"A brass compass on a string and a battered satchel."}, "personality": {"calm"}, "redraw": {"1"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Saving Mara") {
+	resp, body = e.post(page+"/edit", url.Values{"name": {"Mara"}, "role": {"lead"}, "age": {"12 years old"}, "visual": {"Small and wiry with a round face, freckles across the nose, wide hazel eyes and a mop of curly copper hair that never stays put."}, "wardrobe": {"An oversized mustard-yellow raincoat over a striped tee, rolled jeans and red rubber boots."}, "items": {"A brass compass on a string and a battered satchel."}, "personality": {"calm"}, "redraw": {"1"}}, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Saving Mara") || !strings.Contains(body, `id="char-panel"`) {
 		t.Fatalf("save words: %d %s", resp.StatusCode, body[:200])
 	}
 	e.waitIdle()
-	_, body = e.get(base + "/characters")
+	_, body = e.get(page)
 	if !strings.Contains(body, "lead") || !strings.Contains(body, "calm") {
 		t.Fatal("edit should be applied")
 	}
 	// A look change while a revision runs is queued, not refused, and wins.
 	e.hold()
-	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "older"}, nil, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Mara") {
+	resp, body = e.postMultipart(page+"/adjust", map[string]string{"feedback": "older"}, nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Mara") || !strings.Contains(body, `id="panel-root" hx-swap-oob`) {
 		t.Fatalf("adjust: %d", resp.StatusCode)
 	}
-	resp, body = e.post(base+"/characters/"+cid+"/edit", url.Values{"name": {"Mara"}, "visual": {"tall now"}, "redraw": {"1"}}, true)
+	resp, body = e.post(page+"/edit", url.Values{"name": {"Mara"}, "visual": {"tall now"}, "redraw": {"1"}}, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Queued behind the change already running") {
 		t.Fatalf("queued edit: %d %s", resp.StatusCode, body[:300])
 	}
-	// The card keeps showing the running revision (not the queued edit) and polls.
+	// The page keeps showing the running revision and polls.
 	if !strings.Contains(body, "Revising the character") || strings.Contains(body, "Waiting its turn") || !strings.Contains(body, `hx-trigger="every 2s"`) {
-		t.Fatal("the card should show the running job and keep polling")
+		t.Fatal("the page should show the running job and keep polling")
 	}
 	e.release()
 	e.waitIdle()
-	_, body = e.get(base + "/characters")
+	_, body = e.get(page)
 	if !strings.Contains(body, "tall now") || strings.Contains(body, "Waiting its turn") {
 		t.Fatal("the queued edit should be applied after the revision")
 	}
-	// Plain redraw and the lightbox.
-	resp, body = e.post(base+"/characters/"+cid+"/redraw", nil, true)
+	// Redraw from the page, then the lightbox.
+	resp, body = e.post(page+"/redraw", nil, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Redrawing Mara") {
 		t.Fatalf("redraw: %d", resp.StatusCode)
 	}
 	e.waitIdle()
-	resp, body = e.get(base + "/characters/" + cid + "/view?img=1")
+	resp, body = e.get(page + "/view?img=1")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "character sheet") {
 		t.Fatalf("lightbox: %d", resp.StatusCode)
 	}
 	// Cast-level adjust: empty refused, then runs; story buttons disable while it is active.
+	e.target = ""
 	resp, body = e.post(base+"/characters/adjust", url.Values{"feedback": {""}}, true)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("empty cast adjust: %d", resp.StatusCode)
 	}
 	e.hold()
 	resp, body = e.post(base+"/characters/adjust", url.Values{"feedback": {"everyone taller"}}, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising the cast") || !strings.Contains(body, "Adjust the cast</button>") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising the cast") || !strings.Contains(body, `disabled`) {
 		t.Fatalf("cast adjust: %d", resp.StatusCode)
 	}
-	if !strings.Contains(body, `disabled`) {
-		t.Fatal("story-level buttons disable while the cast is being revised")
-	}
 	// A character change during a story-level job queues behind it.
-	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "hat"}, nil, true)
+	e.target = "char-panel"
+	resp, body = e.postMultipart(page+"/adjust", map[string]string{"feedback": "hat"}, nil, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn") {
 		t.Fatalf("character work should queue behind the story job: %d", resp.StatusCode)
 	}
 	e.release()
 	e.waitIdle()
-	_, body = e.get(base + "/characters")
+	_, body = e.get(page)
 	if !strings.Contains(body, "revised: hat") {
 		t.Fatal("the queued character change ran after the cast revision")
 	}
@@ -235,28 +237,63 @@ func TestReferenceEdgeCases(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "choose at least one image") {
 		t.Fatalf("no file: %d", resp.StatusCode)
 	}
-	// Too many files.
+	// Too many files at once.
 	many := map[string][]byte{}
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 6; i++ {
 		many[strings.Repeat("a", i+1)+".png"] = tinyPNG()
 	}
 	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, many, true)
-	if !strings.Contains(body, "at most 8") {
-		t.Fatal("more than 8 files should be refused")
+	if !strings.Contains(body, "at most 5") {
+		t.Fatal("more than 5 files should be refused")
 	}
-	// Oversized file.
-	big := map[string][]byte{"huge.png": make([]byte, 21<<20)}
+	// Oversized file, and an upload over the total cap.
+	big := map[string][]byte{"huge.png": make([]byte, 6<<20)}
 	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, big, true)
-	if !strings.Contains(body, "over 20 MB") {
+	if !strings.Contains(body, "over 5 MB") {
 		t.Fatalf("oversized file should be refused: %s", body[:200])
 	}
-	// Adjust dialog upload error paths.
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"a.png": make([]byte, 11<<20), "b.png": make([]byte, 11<<20)}, true)
+	if !strings.Contains(body, "too large (20 MB total)") {
+		t.Fatalf("total over the cap should be refused: %s", body[:200])
+	}
+	// The per-character limit: five attach, a sixth is refused, also via adjust.
+	five := map[string][]byte{}
+	for i := 0; i < 5; i++ {
+		five[strings.Repeat("r", i+1)+".png"] = tinyPNG()
+	}
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, five, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "5 images attached") {
+		t.Fatalf("five references should attach: %d %s", resp.StatusCode, body[:200])
+	}
+	e.waitIdle()
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"six.png": tinyPNG()}, true)
+	if !strings.Contains(body, "can take 0 more") {
+		t.Fatalf("a sixth reference should be refused: %s", body[:300])
+	}
+	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "x"}, map[string][]byte{"six.png": tinyPNG()}, true)
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "can take 0 more") {
+		t.Fatalf("adjust must respect the limit: %d", resp.StatusCode)
+	}
+	_, body = e.get(base + "/characters/" + cid)
+	if !strings.Contains(body, "That's the limit") || strings.Contains(body, "Add images") {
+		t.Fatal("a full character hides the upload")
+	}
+	_, body = e.get(base + "/characters/" + cid + "/adjust")
+	if strings.Contains(body, `name="references"`) || !strings.Contains(body, "the limit") {
+		t.Fatal("the adjust panel says the limit is reached")
+	}
+	// Remove them all again so the rest of the test starts from zero.
+	_, body = e.get(base + "/characters/" + cid)
+	for _, rid := range allRefIDs(body) {
+		e.post(base+"/refs/"+rid+"/delete", nil, true)
+	}
+	// Adjust panel upload error paths.
 	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "x"}, map[string][]byte{"bad.txt": []byte("no")}, true)
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "not a readable image") {
 		t.Fatalf("adjust with bad file: %d", resp.StatusCode)
 	}
 	resp, body = e.postMultipart(base+"/characters/"+cid+"/adjust", map[string]string{"feedback": "x"}, many, true)
-	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at most 8") {
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at most 5") {
 		t.Fatalf("adjust with too many files: %d", resp.StatusCode)
 	}
 	// Sheet upload: two files is not one.
@@ -278,17 +315,35 @@ func TestReferenceEdgeCases(t *testing.T) {
 	e.release()
 	e.waitIdle()
 	_, body = e.get(base + "/characters")
-	if strings.Count(body, `character sheet"`) != 1 {
+	if strings.Count(body, `class="tile__avatar" src=`) != 1 {
 		t.Fatal("the queued sheet upload should have landed")
 	}
-	// Deleting a reference via a plain form (from the script page) redirects.
+	// Deleting a reference answers the region that asked: the character page
+	// or the roster.
 	resp, _ = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"a.png": tinyPNG()}, true)
 	e.waitIdle()
-	_, body = e.get(base + "/characters")
+	_, body = e.get(base + "/characters/" + cid)
 	rid := firstRefID(body)
-	resp, _ = e.post(base+"/refs/"+rid+"/delete", nil, false)
+	e.target = "char-panel"
+	resp, body = e.post(base+"/refs/"+rid+"/delete", nil, true)
+	e.target = ""
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="char-panel"`) || !strings.Contains(body, "Reference removed") {
+		t.Fatalf("delete should re-render the character panel: %d", resp.StatusCode)
+	}
+	resp, _ = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"b.png": tinyPNG()}, true)
+	e.waitIdle()
+	_, body = e.get(base + "/characters/" + cid)
+	rid = firstRefID(body)
+	resp, body = e.post(base+"/refs/"+rid+"/delete", nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="step-panel"`) {
+		t.Fatalf("delete from the roster re-renders the roster: %d", resp.StatusCode)
+	}
+	resp, _ = e.postMultipart(base+"/characters/"+cid+"/refs", nil, map[string][]byte{"c.png": tinyPNG()}, true)
+	e.waitIdle()
+	_, body = e.get(base + "/characters/" + cid)
+	resp, _ = e.post(base+"/refs/"+firstRefID(body)+"/delete", nil, false)
 	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("plain delete: %d", resp.StatusCode)
+		t.Fatalf("plain delete redirects: %d", resp.StatusCode)
 	}
 }
 
@@ -472,8 +527,8 @@ func TestTwoCharactersCanBeEditedAtOnce(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising Pip") {
 		t.Fatalf("second adjust should be accepted: %d %s", resp.StatusCode, body[:300])
 	}
-	if strings.Count(body, "char--working") != 2 || !strings.Contains(body, `hx-trigger="every 2s"`) || !strings.Contains(body, "Other characters stay editable") {
-		t.Fatalf("two working cards expected:\n%s", body[:500])
+	if strings.Count(body, "tile--working") != 2 || !strings.Contains(body, `hx-trigger="every 2s"`) || strings.Count(body, "Working")+strings.Count(body, "Waiting") < 2 {
+		t.Fatalf("two working tiles expected:\n%s", body[:500])
 	}
 	// The third card is untouched and its edit runs right away; a story-level
 	// action queues behind the character jobs instead of being refused.
@@ -491,11 +546,14 @@ func TestTwoCharactersCanBeEditedAtOnce(t *testing.T) {
 	e.release()
 	e.waitIdle()
 	_, body = e.get(base + "/characters")
-	if strings.Contains(body, "char--working") || strings.Contains(body, `hx-trigger="every 2s"`) || strings.Contains(body, "Waiting its turn") {
+	if strings.Contains(body, "tile--working") || strings.Contains(body, `hx-trigger="every 2s"`) || strings.Contains(body, "Waiting") {
 		t.Fatal("nothing should be working after the jobs finish")
 	}
-	if !strings.Contains(body, "revised: older") || !strings.Contains(body, "revised: younger") || !strings.Contains(body, ">tall<") && !strings.Contains(body, "tall") {
-		t.Fatal("all changes should have been applied")
+	for i, want := range []string{"revised: older", "revised: younger", "tall"} {
+		_, page := e.get(base + "/characters/" + ids[i])
+		if !strings.Contains(page, want) {
+			t.Fatalf("character %d should show %q", i, want)
+		}
 	}
 }
 
@@ -678,5 +736,18 @@ func TestScriptEditorHTMLIsSanitizedAndKept(t *testing.T) {
 	// The word count in the editor footer reflects the text.
 	if !strings.Contains(body, "words so far") {
 		t.Fatal("editor footer shows the word count")
+	}
+}
+
+func allRefIDs(body string) []string {
+	var out []string
+	rest := body
+	for {
+		i := strings.Index(rest, `id="ref-`)
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+len(`id="ref-`):]
+		out = append(out, rest[:strings.Index(rest, `"`)])
 	}
 }

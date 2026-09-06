@@ -118,8 +118,15 @@ func newPage(t *testing.T) playwright.Page {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ctx.Close() })
 	page, err := ctx.NewPage()
+	t.Cleanup(func() {
+		if t.Failed() {
+			if dir := os.Getenv("E2E_SHOTS"); dir != "" {
+				_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(dir + "/" + t.Name() + ".png"), FullPage: playwright.Bool(true)})
+			}
+		}
+		ctx.Close()
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,8 +176,22 @@ func createStory(t *testing.T, page playwright.Page, title, style string) {
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters$`)))
 	// The panel polls itself while the editor reads, then settles on the cast.
 	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToBeVisible())
-	must(t, expect.Locator(page.Locator(".char")).ToHaveCount(3))
+	must(t, expect.Locator(page.Locator(".tile")).ToHaveCount(3))
 	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))
+}
+
+// openCharacter goes from the roster to one character's page.
+func openCharacter(t *testing.T, page playwright.Page, name string) {
+	t.Helper()
+	must(t, page.Locator(".tile:has-text('"+name+"')").Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters/\d+$`)))
+	must(t, expect.Locator(page.Locator(".char-head__name")).ToContainText(name))
+}
+
+// settled waits for the character page to stop polling.
+func settled(t *testing.T, page playwright.Page) {
+	t.Helper()
+	must(t, expect.Locator(page.Locator("#char-panel[hx-trigger]")).ToHaveCount(0))
 }
 
 func TestSignupValidationAndLogin(t *testing.T) {
@@ -218,35 +239,59 @@ func TestScriptToComic(t *testing.T) {
 	signup(t, page, "walker")
 	createStory(t, page, "The Lighthouse Keeper's Robot", "Storybook")
 
-	// Casting phase: no art, upload a reference to the first character.
+	// Casting phase: no art yet. Every character has its own page.
 	must(t, expect.Locator(page.Locator("button:has-text('Draw the character sheets')").First()).ToBeVisible())
-	must(t, expect.Locator(page.Locator(".char__sheet img")).ToHaveCount(0))
-	must(t, page.Locator(".ref-upload input[name=references]").First().SetInputFiles([]string{refPNG}))
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(0))
+	openCharacter(t, page, "Mara")
+	must(t, expect.Locator(page.Locator(".rail__item")).ToHaveCount(3))
+	must(t, expect.Locator(page.Locator(".refs-head")).ToContainText("0 of 5"))
+
+	// Upload a reference from the page.
+	must(t, page.Locator(".refs-section input[name=references]").SetInputFiles([]string{refPNG}))
 	must(t, expect.Locator(page.Locator(".toast")).ToContainText("attached to"))
-	must(t, expect.Locator(page.Locator(".char").First().Locator(".ref__img")).ToHaveCount(1))
-	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".ref__img")).ToHaveCount(1))
+	must(t, expect.Locator(page.Locator(".refs-head")).ToContainText("1 of 5"))
 
-	// Adjust one character from the dialog with feedback.
-	must(t, page.Locator("button:has-text('Adjust'):not(:has-text('cast'))").First().Click())
-	must(t, expect.Locator(page.Locator(".dialog")).ToContainText("Adjust Mara"))
+	// Edit the words in place.
+	must(t, page.Locator("#char-details button:has-text('Edit')").Click())
+	must(t, expect.Locator(page.Locator(".details__form")).ToBeVisible())
+	must(t, page.Fill("#role", "captain"))
+	must(t, page.Click(".details__form button:has-text('Save')"))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".char-head__meta")).ToContainText("captain"))
+
+	// Adjust with notes from the side panel.
+	must(t, page.Locator("button:has-text('Adjust with notes')").Click())
+	must(t, expect.Locator(page.Locator(".side-panel")).ToContainText("Adjust Mara"))
 	must(t, page.Fill("#feedback", "shorter hair"))
-	must(t, page.Click(".dialog button:has-text('Revise and redraw')"))
-	must(t, expect.Locator(page.Locator(".dialog")).ToHaveCount(0))
-	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))
-	must(t, expect.Locator(page.Locator(".char").First()).ToContainText("revised: shorter hair"))
+	must(t, page.Click(".side-panel button:has-text('Revise')"))
+	must(t, expect.Locator(page.Locator(".side-panel")).ToHaveCount(0))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".details__list")).ToContainText("revised: shorter hair"))
 
-	// Draw the sheets, then storyboard.
+	// Next character, then back to the roster; draw the sheets, then storyboard.
+	must(t, page.Locator(".char-head__nav a").Last().Click())
+	must(t, expect.Locator(page.Locator(".char-head__name")).ToContainText("Pip"))
+	must(t, page.Locator(".rail__back").Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters$`)))
 	must(t, page.Locator("button:has-text('Draw the character sheets')").First().Click())
 	must(t, expect.Locator(page.Locator(".job__title")).ToContainText("Drawing character sheets"))
-	must(t, expect.Locator(page.Locator(".char__sheet img")).ToHaveCount(3))
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(3))
 	must(t, expect.Locator(page.Locator("button:has-text('Storyboard the pages')").First()).ToBeVisible())
 
-	// The sheet lightbox opens and closes.
-	must(t, page.Locator(".char__sheet-btn").First().Click())
+	// The sheet and its lightbox on the character page; redraw from there.
+	openCharacter(t, page, "Mara")
+	must(t, page.Locator(".char__sheet-btn").Click())
 	must(t, expect.Locator(page.Locator(".lightbox__image")).ToBeVisible())
 	must(t, expect.Locator(page.Locator(".lightbox__caption")).ToContainText("character sheet"))
 	must(t, page.Keyboard().Press("Escape"))
 	must(t, expect.Locator(page.Locator(".lightbox")).ToHaveCount(0))
+	must(t, page.Locator("button:has-text('Redraw')").Click())
+	must(t, expect.Locator(page.Locator(".toast")).ToContainText("Redrawing Mara"))
+	settled(t, page)
+	must(t, page.Locator(".rail__back").Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters$`)))
 
 	must(t, page.Locator("button:has-text('Storyboard the pages')").First().Click())
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pages$`)))
@@ -311,24 +356,32 @@ func TestReuseACharacterAcrossStories(t *testing.T) {
 	signup(t, page, "showrunner")
 	createStory(t, page, "Book One", "Classic comic")
 	must(t, page.Locator("button:has-text('Draw the character sheets')").First().Click())
-	must(t, expect.Locator(page.Locator(".char__sheet img")).ToHaveCount(3))
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(3))
 
 	createStory(t, page, "Book Two", "Manga")
-	must(t, expect.Locator(page.Locator(".suggest")).ToHaveCount(3))
-	must(t, expect.Locator(page.Locator(".suggest").First()).ToContainText("Same Mara as in Book One?"))
-	must(t, page.Locator(".suggest button:has-text('Yes, use this one')").First().Click())
+	must(t, expect.Locator(page.Locator(".tile:has-text('Match in Book One')")).ToHaveCount(3))
+	openCharacter(t, page, "Mara")
+	must(t, expect.Locator(page.Locator(".suggest")).ToContainText("Same Mara as in Book One?"))
+	must(t, page.Locator(".suggest button:has-text('Yes, use this one')").Click())
 	must(t, expect.Locator(page.Locator(".toast")).ToContainText("is now the same character"))
-	must(t, expect.Locator(page.Locator(".char").First().Locator(".char__sheet img")).ToHaveCount(1))
-	must(t, expect.Locator(page.Locator(".char").First()).ToContainText("Also in"))
-	must(t, expect.Locator(page.Locator(".suggest")).ToHaveCount(2))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".char__sheet-btn img")).ToHaveCount(1))
+	must(t, expect.Locator(page.Locator(".char-head")).ToContainText("Also in"))
+	must(t, expect.Locator(page.Locator(".suggest")).ToHaveCount(0))
 
-	// The rest of the cast can be picked from the registry dialog.
-	must(t, page.Locator("button:has-text('From another story')").First().Click())
-	must(t, expect.Locator(page.Locator(".dialog")).ToContainText("someone you already have?"))
+	// The rest of the cast can be picked from the registry panel.
+	must(t, page.Locator(".rail__item:has-text('Pip')").Click())
+	must(t, expect.Locator(page.Locator(".char-head__name")).ToContainText("Pip"))
+	must(t, page.Locator("button:has-text('Reuse from another story')").Click())
+	must(t, expect.Locator(page.Locator(".side-panel")).ToContainText("someone you already have?"))
 	must(t, expect.Locator(page.Locator(".link-row")).ToHaveCount(3))
 	must(t, page.Locator(".link-row:has-text('Pip') button:has-text('Use')").Click())
-	must(t, expect.Locator(page.Locator(".dialog")).ToHaveCount(0))
-	must(t, expect.Locator(page.Locator(".char__sheet img")).ToHaveCount(2))
+	must(t, expect.Locator(page.Locator(".side-panel")).ToHaveCount(0))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".char__sheet-btn img")).ToHaveCount(1))
+	must(t, page.Locator(".rail__back").Click())
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(2))
+	must(t, expect.Locator(page.Locator(".tile:has-text('Match in Book One')")).ToHaveCount(1))
 	must(t, expect.Locator(page.Locator("button:has-text('Draw the remaining sheets')").First()).ToBeVisible())
 
 	must(t, page.Click("a:has-text('Your cast')"))
@@ -341,10 +394,14 @@ func TestUploadAFinishedSheet(t *testing.T) {
 	page := newPage(t)
 	signup(t, page, "illustrator")
 	createStory(t, page, "Own Art", "Noir")
-	must(t, page.Locator(".ref-upload input[name=sheet]").Nth(1).SetInputFiles([]string{refPNG}))
+	openCharacter(t, page, "Pip")
+	must(t, page.Locator("input[name=sheet]").SetInputFiles([]string{refPNG}))
 	must(t, expect.Locator(page.Locator(".toast")).ToContainText("Sheet set for Pip"))
-	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))
-	must(t, expect.Locator(page.Locator(".char__sheet img")).ToHaveCount(1))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".char__sheet-btn img")).ToHaveCount(1))
+	must(t, expect.Locator(page.Locator("label:has-text('Replace with my own')")).ToBeVisible())
+	must(t, page.Locator(".rail__back").Click())
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(1))
 	must(t, expect.Locator(page.Locator("button:has-text('Draw the remaining sheets')").First()).ToBeVisible())
 	// Deleting the story from its dialog returns to the library.
 	must(t, page.Click("button:has-text('Delete')"))

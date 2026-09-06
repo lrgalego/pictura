@@ -69,29 +69,67 @@ func uploads(r *http.Request) ([]*multipart.FileHeader, error) {
 
 // uploadsField reads the files posted under one multipart field name.
 func uploadsField(r *http.Request, name string) ([]*multipart.FileHeader, error) {
+	return uploadsFieldMax(r, name, maxUploadFile)
+}
+
+func uploadsFieldMax(r *http.Request, name string, maxFile int64) ([]*multipart.FileHeader, error) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 		return nil, r.ParseForm()
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		return nil, fmt.Errorf("the upload is too large (64 MB total)")
+	tooBig := fmt.Errorf("the upload is too large (%d MB total)", maxUploadTotal>>20)
+	if r.ContentLength > maxUploadTotal {
+		return nil, tooBig
+	}
+	r.Body = http.MaxBytesReader(nil, r.Body, maxUploadTotal)
+	if err := r.ParseMultipartForm(maxUploadTotal); err != nil {
+		return nil, tooBig
 	}
 	if r.MultipartForm == nil {
 		return nil, nil
 	}
 	var out []*multipart.FileHeader
+	var total int64
 	for _, fh := range r.MultipartForm.File[name] {
 		if fh.Size == 0 {
 			continue
 		}
-		if fh.Size > 20<<20 {
-			return nil, fmt.Errorf("%s is over 20 MB", fh.Filename)
+		if fh.Size > maxFile {
+			return nil, fmt.Errorf("%s is over %d MB", fh.Filename, maxFile>>20)
+		}
+		if total += fh.Size; total > maxUploadTotal {
+			return nil, tooBig
 		}
 		out = append(out, fh)
 	}
-	if len(out) > 8 {
-		return nil, fmt.Errorf("at most 8 reference images at a time")
+	if len(out) > views.MaxRefs {
+		return nil, fmt.Errorf("at most %d reference images per character", views.MaxRefs)
 	}
 	return out, nil
+}
+
+// Upload caps. References are normalized to refMaxSide pixels on the
+// long edge before storage, so a 5 MB photo becomes a few hundred KB.
+const (
+	maxUploadFile  = 5 << 20
+	maxUploadTotal = 20 << 20
+	maxSheetFile   = 10 << 20
+	refMaxSide     = 1200
+	sheetMaxSide   = 2048
+)
+
+// refRoom is how many more references a character may take.
+func (s *server) refRoom(r *http.Request, st *store.Story, c *store.Character) (int, error) {
+	refs, err := s.st.Refs(r.Context(), st.ID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, ref := range refs {
+		if ref.CharacterID == c.ID {
+			n++
+		}
+	}
+	return views.MaxRefs - n, nil
 }
 
 // saveRefs stores uploaded references for a story (and a character, or 0).
@@ -106,7 +144,7 @@ func (s *server) saveRefs(r *http.Request, storyID, characterID int64, files []*
 		if err != nil {
 			return err
 		}
-		if _, err := s.st.InsertRef(r.Context(), storyID, characterID, fh.Filename, note, data); err != nil {
+		if _, err := s.st.InsertRef(r.Context(), storyID, characterID, fh.Filename, note, data, refMaxSide); err != nil {
 			return err
 		}
 	}
@@ -229,11 +267,21 @@ func (s *server) deleteStory(w http.ResponseWriter, r *http.Request) {
 // ---------- step 2: characters ----------
 
 func (s *server) charactersView(r *http.Request, st *store.Story) (views.CharactersView, error) {
-	chars, err := s.st.Characters(r.Context(), st.ID)
+	// Jobs are read before the data they change: a job that finishes in
+	// between is then seen as done and the data read after it is fresh.
+	job, err := s.st.LatestJob(r.Context(), st.ID)
 	if err != nil {
 		return views.CharactersView{}, err
 	}
-	job, err := s.st.LatestJob(r.Context(), st.ID)
+	charJobs, err := s.st.LatestCharacterJobs(r.Context(), st.ID)
+	if err != nil {
+		return views.CharactersView{}, err
+	}
+	working, err := s.st.AnyRunning(r.Context(), st.ID)
+	if err != nil {
+		return views.CharactersView{}, err
+	}
+	chars, err := s.st.Characters(r.Context(), st.ID)
 	if err != nil {
 		return views.CharactersView{}, err
 	}
@@ -243,14 +291,6 @@ func (s *server) charactersView(r *http.Request, st *store.Story) (views.Charact
 	}
 	pages, _ := s.st.Pages(r.Context(), st.ID)
 	lib, err := s.st.Library(r.Context(), st.UserID)
-	if err != nil {
-		return views.CharactersView{}, err
-	}
-	charJobs, err := s.st.LatestCharacterJobs(r.Context(), st.ID)
-	if err != nil {
-		return views.CharactersView{}, err
-	}
-	working, err := s.st.AnyRunning(r.Context(), st.ID)
 	if err != nil {
 		return views.CharactersView{}, err
 	}
@@ -352,27 +392,6 @@ func (s *server) character(w http.ResponseWriter, r *http.Request, st *store.Sto
 	return c, true
 }
 
-func (s *server) characterAdjustDialog(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.story(w, r)
-	if !ok {
-		return
-	}
-	c, ok := s.character(w, r, st)
-	if !ok {
-		return
-	}
-	layout.Fragments(w, r, views.FeedbackDialog(views.FeedbackDialogProps{
-		Title:       "Adjust " + c.Name,
-		Description: "Describe the change. The description is revised and the sheet redrawn.",
-		Placeholder: "e.g. Shorter hair, a leather jacket instead of the coat, and she should look more tired.",
-		Action:      fmt.Sprintf("/stories/%d/characters/%d/adjust", st.ID, c.ID),
-		Target:      "#step-panel",
-		Submit:      "Revise and redraw",
-		Files:       true,
-		FilesHelp:   "Photos, sketches, outfits or props " + c.Name + " should match. They stay attached to the character.",
-	}))
-}
-
 func (s *server) characterAdjust(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
@@ -392,22 +411,31 @@ func (s *server) characterAdjust(w http.ResponseWriter, r *http.Request) {
 		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.FeedbackField("", "", "Say what should change, or attach reference images.", true))
 		return
 	}
+	room, err := s.refRoom(r, st, c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if len(files) > room {
+		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.FeedbackField(fb, "", fmt.Sprintf("%s can take %d more reference image(s); the limit is %d.", c.Name, room, views.MaxRefs), true))
+		return
+	}
 	if err := s.saveRefs(r, st.ID, c.ID, files, fb); err != nil {
 		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.FeedbackField(fb, "", err.Error(), true))
 		return
 	}
 	art := c.SheetStatus != store.ImagePending
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.jobs.Revise(st.ID, c.ID, fb, len(files) > 0, art); err != nil {
-		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(err))
+		s.answerEither(w, r, st, c, views.ClosePanel(), errorToast(err))
 		return
 	}
-	desc := "New description. Draw the sheets when the cast reads right."
+	desc := "New description. Draw the sheet when the words read right."
 	if art {
 		desc = "New description, new sheet."
 	}
-	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, "Revising "+c.Name, desc))
+	s.answerEither(w, r, st, c, views.ClosePanel(), toast(components.ToastSuccess, "Revising "+c.Name, queuedNote(queued, desc)))
 }
-
 func (s *server) characterRedraw(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
@@ -417,25 +445,17 @@ func (s *server) characterRedraw(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.jobs.Revise(st.ID, c.ID, "", false, true); err != nil {
-		s.answerCharacters(w, r, st, errorToast(err))
+		s.answerEither(w, r, st, c, errorToast(err))
 		return
 	}
-	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Redrawing "+c.Name, "Same description, fresh sheet."))
+	title := "Redrawing " + c.Name
+	if c.SheetStatus == store.ImagePending {
+		title = "Drawing " + c.Name
+	}
+	s.answerEither(w, r, st, c, toast(components.ToastSuccess, title, queuedNote(queued, "From the description and any references.")))
 }
-
-func (s *server) characterEditDialog(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.story(w, r)
-	if !ok {
-		return
-	}
-	c, ok := s.character(w, r, st)
-	if !ok {
-		return
-	}
-	layout.Fragments(w, r, views.CharacterEditDialog(st, c))
-}
-
 func (s *server) characterEdit(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
@@ -453,18 +473,22 @@ func (s *server) characterEdit(w http.ResponseWriter, r *http.Request) {
 	if f.Name == "" || f.Visual == "" {
 		draft := *c
 		draft.Name, draft.Role, draft.Age, draft.Visual, draft.Wardrobe, draft.Items, draft.Personality = f.Name, f.Role, f.Age, f.Visual, f.Wardrobe, f.Items, f.Personality
-		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.CharacterEditFields(&draft, "A name and an appearance are required.", true))
+		v, err := s.characterView(r, st, c)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		v.Character, v.Editing = &draft, true
+		layout.FragmentsStatus(w, r, http.StatusUnprocessableEntity, views.CharacterPanel(v), toast(components.ToastDestructive, "Not saved", "A name and a description of the looks are required."))
 		return
 	}
 	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.jobs.Edit(st.ID, c.ID, f); err != nil {
-		s.answerCharacters(w, r, st, views.CloseModal(), errorToast(err))
+		s.answerEither(w, r, st, c, errorToast(err))
 		return
 	}
-	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, "Saving "+f.Name, queuedNote(queued, "The sheet is redrawn if the look changed.")))
+	s.answerEither(w, r, st, c, toast(components.ToastSuccess, "Saving "+f.Name, queuedNote(queued, "The sheet is redrawn if the look changed.")))
 }
-
-// queuedNote words a toast for work that had to wait its turn.
 func queuedNote(queued bool, otherwise string) string {
 	if queued {
 		return "Queued behind the change already running on this character."
@@ -494,11 +518,14 @@ func (s *server) refDelete(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if layout.IsFragment(r) {
-		s.answerCharacters(w, r, st, toast(components.ToastDefault, "Reference removed", "Redraw the sheet when you want it to forget the image."))
-		return
+	note := toast(components.ToastDefault, "Reference removed", "Redraw the sheet when you want it to forget the image.")
+	if ref.CharacterID != 0 {
+		if c, err := s.st.Character(r.Context(), ref.CharacterID); err == nil {
+			s.answerEither(w, r, st, c, note)
+			return
+		}
 	}
-	redirect(w, r, fmt.Sprintf("/stories/%d/script", st.ID))
+	s.answerCharacters(w, r, st, note)
 }
 
 // characterSheet stores an uploaded image as the character's finished sheet
@@ -512,12 +539,12 @@ func (s *server) characterSheet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	files, err := uploadsField(r, "sheet")
+	files, err := uploadsFieldMax(r, "sheet", maxSheetFile)
 	if err == nil && len(files) != 1 {
 		err = fmt.Errorf("choose one image to use as the sheet")
 	}
 	if err != nil {
-		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "No sheet uploaded", err.Error()))
+		s.answerEither(w, r, st, c, toast(components.ToastDestructive, "No sheet uploaded", err.Error()))
 		return
 	}
 	f, err := files[0].Open()
@@ -531,9 +558,9 @@ func (s *server) characterSheet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	png, err := store.NormalizeImage(data, 2048)
+	png, err := store.NormalizeImage(data, sheetMaxSide)
 	if err != nil {
-		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "No sheet uploaded", files[0].Filename+": not a readable image (PNG, JPEG, GIF or WebP)"))
+		s.answerEither(w, r, st, c, toast(components.ToastDestructive, "No sheet uploaded", files[0].Filename+": not a readable image (PNG, JPEG, GIF or WebP)"))
 		return
 	}
 	name, err := s.st.SaveImage(r.Context(), st.ID, "png", png)
@@ -543,10 +570,10 @@ func (s *server) characterSheet(w http.ResponseWriter, r *http.Request) {
 	}
 	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.jobs.SetSheet(st.ID, c.ID, name); err != nil {
-		s.answerCharacters(w, r, st, errorToast(err))
+		s.answerEither(w, r, st, c, errorToast(err))
 		return
 	}
-	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Sheet set for "+c.Name, queuedNote(queued, "Your image is the character sheet now. The editor is updating the description to match it.")))
+	s.answerEither(w, r, st, c, toast(components.ToastSuccess, "Sheet set for "+c.Name, queuedNote(queued, "Your image is the character sheet now. The editor is updating the description to match it.")))
 }
 
 // ---------- cast registry ----------
@@ -660,24 +687,6 @@ func (s *server) castLibrary(w http.ResponseWriter, r *http.Request) {
 	render(w, r, views.Shell(s.shell(r, "Your cast"), views.CastLibrary(groups)))
 }
 
-func (s *server) characterLinkDialog(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.story(w, r)
-	if !ok {
-		return
-	}
-	c, ok := s.character(w, r, st)
-	if !ok {
-		return
-	}
-	lib, err := s.st.Library(r.Context(), st.UserID)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	layout.Fragments(w, r, views.LinkDialog(st, c, registry(lib, st.ID)))
-}
-
-// characterLink makes this character the same as one from another story.
 func (s *server) characterLink(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
@@ -707,7 +716,7 @@ func (s *server) characterLink(w http.ResponseWriter, r *http.Request) {
 	if src.SheetStatus != store.ImageReady {
 		desc = "Look and references copied from " + titleOr(srcStory) + "; the sheet still needs drawing."
 	}
-	s.answerCharacters(w, r, st, views.CloseModal(), toast(components.ToastSuccess, c.Name+" is now the same character", queuedNote(queued, desc)))
+	s.answerEither(w, r, st, c, views.ClosePanel(), toast(components.ToastSuccess, c.Name+" is now the same character", queuedNote(queued, desc)))
 }
 
 func titleOr(st *store.Story) string {
@@ -746,28 +755,34 @@ func (s *server) characterRefs(w http.ResponseWriter, r *http.Request) {
 	if err == nil && len(files) == 0 {
 		err = fmt.Errorf("choose at least one image")
 	}
+	if err == nil {
+		var room int
+		if room, err = s.refRoom(r, st, c); err == nil && len(files) > room {
+			err = fmt.Errorf("%s can take %d more reference image(s); the limit is %d", c.Name, room, views.MaxRefs)
+		}
+	}
 	if err != nil {
-		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "Nothing attached", err.Error()))
+		s.answerEither(w, r, st, c, toast(components.ToastDestructive, "Nothing attached", err.Error()))
 		return
 	}
 	queued := s.jobs.CharacterBusy(st.ID, c.ID)
 	if err := s.saveRefs(r, st.ID, c.ID, files, field(r, "note")); err != nil {
-		s.answerCharacters(w, r, st, toast(components.ToastDestructive, "Nothing attached", err.Error()))
+		s.answerEither(w, r, st, c, toast(components.ToastDestructive, "Nothing attached", err.Error()))
 		return
 	}
 	art := c.SheetStatus != store.ImagePending
 	if err := s.jobs.Revise(st.ID, c.ID, "", true, art); err != nil {
-		s.answerCharacters(w, r, st, errorToast(err))
+		s.answerEither(w, r, st, c, errorToast(err))
 		return
 	}
 	desc := "The editor is folding them into the description."
 	if art {
 		desc = "Description revised and sheet redrawn to match."
 	}
-	s.answerCharacters(w, r, st, toast(components.ToastSuccess, fmt.Sprintf("%s attached to %s", plural(len(files), "image", "images"), c.Name), queuedNote(queued, desc)))
+	s.answerEither(w, r, st, c, toast(components.ToastSuccess, fmt.Sprintf("%s attached to %s", plural(len(files), "image", "images"), c.Name), queuedNote(queued, desc)))
 }
 
-func (s *server) characterView(w http.ResponseWriter, r *http.Request) {
+func (s *server) characterLightbox(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
 		return
@@ -797,6 +812,152 @@ func (s *server) characterView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	layout.Fragments(w, r, components.ImageLightbox(components.ImageLightboxProps{Images: imgs, Index: idx, URL: fmt.Sprintf("/stories/%d/characters/%d/view", st.ID, want)}))
+}
+
+// characterView assembles one character's page.
+func (s *server) characterView(r *http.Request, st *store.Story, c *store.Character) (views.CharacterView, error) {
+	cv, err := s.charactersView(r, st)
+	if err != nil {
+		return views.CharacterView{}, err
+	}
+	for _, cc := range cv.Characters {
+		if cc.ID == c.ID {
+			c = cc
+		}
+	}
+	return views.CharacterView{
+		Story: st, Character: c, Cast: cv.Characters, CastJobs: cv.CharJobs, StoryJob: cv.Job,
+		Refs: refsOf(cv.Refs, c.ID), Matches: cv.Suggestions[c.ID], AlsoIn: cv.Lineage[c.ID],
+		Working: cv.Working,
+	}, nil
+}
+
+func refsOf(refs []*store.Ref, characterID int64) []*store.Ref {
+	var out []*store.Ref
+	for _, r := range refs {
+		if r.CharacterID == characterID {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (s *server) characterPage(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	c, ok := s.character(w, r, st)
+	if !ok {
+		return
+	}
+	v, err := s.characterView(r, st, c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	render(w, r, views.Shell(s.shell(r, c.Name+" · "+titleOr(st)), views.StoryShell(st, store.StepCharacters, views.CharacterPage(v))))
+}
+
+func (s *server) characterPanel(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	c, ok := s.character(w, r, st)
+	if !ok {
+		return
+	}
+	s.answerCharacter(w, r, st, c)
+}
+
+// answerCharacter renders the character page's polled region, with extras.
+func (s *server) answerCharacter(w http.ResponseWriter, r *http.Request, st *store.Story, c *store.Character, extra ...templ.Component) {
+	v, err := s.characterView(r, st, c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	// A quick job may have changed the character since it was read. The view
+	// checked for running jobs first, so what is read now is either fresh or
+	// still covered by polling.
+	if fresh, err := s.st.Character(r.Context(), c.ID); err == nil {
+		v.Character = fresh
+	}
+	layout.Fragments(w, r, append([]templ.Component{views.CharacterPanel(v)}, extra...)...)
+}
+
+// answerEither re-renders whichever region asked: the character page's
+// panel or the roster.
+func (s *server) answerEither(w http.ResponseWriter, r *http.Request, st *store.Story, c *store.Character, extra ...templ.Component) {
+	if !layout.IsFragment(r) {
+		http.Redirect(w, r, fmt.Sprintf("/stories/%d/characters/%d", st.ID, c.ID), http.StatusSeeOther)
+		return
+	}
+	if fromCharacterPage(r) {
+		s.answerCharacter(w, r, st, c, extra...)
+		return
+	}
+	s.answerCharacters(w, r, st, extra...)
+}
+
+// fromCharacterPage reports whether the request targets the character
+// page's panel. htmx sends the target as "div#char-panel"; tests and older
+// clients send the bare id.
+func fromCharacterPage(r *http.Request) bool {
+	t := r.Header.Get("HX-Target")
+	return t == "char-panel" || strings.HasSuffix(t, "#char-panel")
+}
+
+func (s *server) characterEditForm(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	c, ok := s.character(w, r, st)
+	if !ok {
+		return
+	}
+	layout.Fragments(w, r, views.CharacterEditForm(st, c, ""))
+}
+
+func (s *server) characterAdjustPanel(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	c, ok := s.character(w, r, st)
+	if !ok {
+		return
+	}
+	v, err := s.characterView(r, st, c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	layout.Fragments(w, r, views.AdjustPanel(v))
+}
+
+func (s *server) characterLinkPanel(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	c, ok := s.character(w, r, st)
+	if !ok {
+		return
+	}
+	v, err := s.characterView(r, st, c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	lib, err := s.st.Library(r.Context(), st.UserID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	layout.Fragments(w, r, views.LinkPanel(v, registry(lib, st.ID)))
 }
 
 // ---------- step 3: pages ----------

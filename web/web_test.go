@@ -47,6 +47,7 @@ type env struct {
 	t      *testing.T
 	srv    *httptest.Server
 	client *http.Client
+	target string // HX-Target sent with htmx requests; "char-panel" acts from a character page
 	runner *jobs.Runner
 	st     *store.Store
 	ai     *gated
@@ -113,9 +114,7 @@ func (e *env) post(path string, form url.Values, hx bool) (*http.Response, strin
 	e.t.Helper()
 	req, _ := http.NewRequest("POST", e.srv.URL+path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if hx {
-		req.Header.Set("HX-Request", "true")
-	}
+	e.hx(req, hx)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		e.t.Fatal(err)
@@ -123,6 +122,16 @@ func (e *env) post(path string, form url.Values, hx bool) (*http.Response, strin
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	return resp, string(b)
+}
+
+func (e *env) hx(req *http.Request, hx bool) {
+	if !hx {
+		return
+	}
+	req.Header.Set("HX-Request", "true")
+	if e.target != "" {
+		req.Header.Set("HX-Target", e.target)
+	}
 }
 
 // signup registers an account and enables it, the way an operator would.
@@ -248,6 +257,7 @@ func TestFullWorkflow(t *testing.T) {
 	}
 
 	// A feedback dialog opens, empty feedback is refused, real feedback runs a job.
+	_, body = e.get(charsURL)
 	resp, body = e.get(storyBase + "/characters/adjust")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Adjust the whole cast") {
 		t.Fatalf("adjust dialog: %d", resp.StatusCode)
@@ -261,7 +271,7 @@ func TestFullWorkflow(t *testing.T) {
 		t.Fatalf("cast adjust: %d %s", resp.StatusCode, body)
 	}
 	e.waitIdle()
-	_, body = e.get(charsURL)
+	_, body = e.get(charsURL + "/" + firstCharacterID(body))
 	if !strings.Contains(body, "revised: Give Pip a red scarf") {
 		t.Fatal("feedback was not applied to the cast")
 	}
@@ -366,9 +376,7 @@ func (e *env) postMultipartField(path string, fields map[string]string, field st
 	mw.Close()
 	req, _ := http.NewRequest("POST", e.srv.URL+path, &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if hx {
-		req.Header.Set("HX-Request", "true")
-	}
+	e.hx(req, hx)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		e.t.Fatal(err)
@@ -395,49 +403,52 @@ func TestReferenceImages(t *testing.T) {
 	e.waitIdle()
 	_, body = e.get(storyBase + "/characters")
 	cid := firstCharacterID(body)
-	if !strings.Contains(body, "Attach reference images") {
-		t.Fatal("cards should offer an upload in the casting phase")
+	page := storyBase + "/characters/" + cid
+	e.target = "char-panel"
+	resp, body = e.get(page)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Add images") || !strings.Contains(body, "0 of 5") || !strings.Contains(body, `class="rail"`) {
+		t.Fatalf("character page should offer uploads and show the limit:\n%s", body[:300])
 	}
 
 	// A non-image is refused; a real image attaches to the character and
 	// revises the description without drawing anything.
-	resp, body = e.postMultipart(storyBase+"/characters/"+cid+"/refs", nil, map[string][]byte{"notes.txt": []byte("hello")}, true)
+	resp, body = e.postMultipart(page+"/refs", nil, map[string][]byte{"notes.txt": []byte("hello")}, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "not a readable image") {
 		t.Fatalf("bad upload: %d", resp.StatusCode)
 	}
-	resp, _ = e.postMultipart(storyBase+"/characters/"+cid+"/refs", map[string]string{"note": "the raincoat"}, map[string][]byte{"coat.png": tinyPNG()}, true)
+	resp, _ = e.postMultipart(page+"/refs", map[string]string{"note": "the raincoat"}, map[string][]byte{"coat.png": tinyPNG()}, true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("attach: %d", resp.StatusCode)
 	}
 	e.waitIdle()
-	_, body = e.get(storyBase + "/characters")
-	if !strings.Contains(body, "1 reference image") || !strings.Contains(body, "the raincoat") || !strings.Contains(body, "matched to 1 reference image") {
+	_, body = e.get(page)
+	if !strings.Contains(body, "1 of 5") || !strings.Contains(body, "raincoat") || !strings.Contains(body, "matched to 1 reference image") {
 		t.Fatalf("reference not attached or description not revised:\n%s", body)
 	}
-	if strings.Contains(body, "/media/t/") && strings.Count(body, "/media/t/") != 1 {
-		t.Fatal("only the reference thumbnail should be an image; no sheets yet")
+	if strings.Contains(body, `class="char__sheet-btn"`) {
+		t.Fatal("no sheet yet")
 	}
 
-	// The character's adjust dialog offers uploads; empty is refused; an image alone works.
-	_, body = e.get(storyBase + "/characters/" + cid + "/adjust")
-	if !strings.Contains(body, `name="references"`) {
-		t.Fatal("character adjust dialog has no upload field")
+	// The adjust side panel offers uploads; empty is refused; an image alone works.
+	_, body = e.get(page + "/adjust")
+	if !strings.Contains(body, `name="references"`) || !strings.Contains(body, `class="side-panel"`) {
+		t.Fatal("character adjust panel has no upload field")
 	}
 	_, body = e.get(storyBase + "/characters/adjust")
 	if strings.Contains(body, `name="references"`) {
 		t.Fatal("cast-wide adjust must not offer uploads")
 	}
-	resp, body = e.postMultipart(storyBase+"/characters/"+cid+"/adjust", map[string]string{"feedback": ""}, nil, true)
+	resp, body = e.postMultipart(page+"/adjust", map[string]string{"feedback": ""}, nil, true)
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "attach reference images") {
 		t.Fatalf("empty adjust: %d", resp.StatusCode)
 	}
-	resp, _ = e.postMultipart(storyBase+"/characters/"+cid+"/adjust", map[string]string{"feedback": ""}, map[string][]byte{"sketch.png": tinyPNG()}, true)
+	resp, _ = e.postMultipart(page+"/adjust", map[string]string{"feedback": ""}, map[string][]byte{"sketch.png": tinyPNG()}, true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("adjust with only an image: %d", resp.StatusCode)
 	}
 	e.waitIdle()
-	_, body = e.get(storyBase + "/characters")
-	if !strings.Contains(body, "2 reference images") {
+	_, body = e.get(page)
+	if !strings.Contains(body, "2 of 5") {
 		t.Fatalf("second reference not attached:\n%s", body)
 	}
 
@@ -445,66 +456,48 @@ func TestReferenceImages(t *testing.T) {
 	// drawing, and the description is rewritten from it.
 	_, body = e.get(storyBase + "/characters")
 	cids := allCharacterIDs(body)
-	other := cids[1]
-	resp, body = e.postMultipartField(storyBase+"/characters/"+other+"/sheet", nil, "sheet", map[string][]byte{"notes.txt": []byte("x")}, true)
+	other := storyBase + "/characters/" + cids[1]
+	resp, body = e.postMultipartField(other+"/sheet", nil, "sheet", map[string][]byte{"notes.txt": []byte("x")}, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "not a readable image") {
 		t.Fatalf("bad sheet accepted: %d", resp.StatusCode)
 	}
-	resp, body = e.postMultipartField(storyBase+"/characters/"+other+"/sheet", nil, "sheet", map[string][]byte{"pip-sheet.png": tinyPNG()}, true)
+	resp, body = e.postMultipartField(other+"/sheet", nil, "sheet", map[string][]byte{"pip-sheet.png": tinyPNG()}, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Sheet set for") {
 		t.Fatalf("sheet upload: %d %s", resp.StatusCode, body)
 	}
 	e.waitIdle()
 	_, body = e.get(storyBase + "/characters")
-	if strings.Count(body, `character sheet"`) != 1 || !strings.Contains(body, "Draw the remaining sheets") {
+	if strings.Count(body, `class="tile__avatar" src=`) != 1 || !strings.Contains(body, "Draw the remaining sheets") {
 		t.Fatalf("uploaded sheet should be the only sheet so far:\n%s", body)
 	}
-	if !strings.Contains(body, "matched to 1 reference image") {
+	_, body = e.get(other)
+	if !strings.Contains(body, "matched to 1 reference image") || !strings.Contains(body, "Replace with my own") {
 		t.Fatalf("the uploaded sheet should have revised the description:\n%s", body)
 	}
 
 	// Now draw: the sheet for the referenced character is made from its references.
+	e.target = ""
 	resp, _ = e.post(storyBase+"/characters/draw", nil, true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("draw: %d", resp.StatusCode)
 	}
 	e.waitIdle()
 	_, body = e.get(storyBase + "/characters")
-	if strings.Count(body, "character sheet\"") != 3 || !strings.Contains(body, "Redraw") || !strings.Contains(body, "Storyboard the pages") {
+	if strings.Count(body, `class="tile__avatar" src=`) != 3 || !strings.Contains(body, "Storyboard the pages") {
 		t.Fatalf("sheets not drawn:\n%s", body)
 	}
+	_, body = e.get(page)
+	if !strings.Contains(body, "Redraw") || !strings.Contains(body, `class="char__sheet-btn"`) {
+		t.Fatal("drawn character shows its sheet and a redraw")
+	}
 
-	// Remove one reference.
+	// Remove one reference from the character page.
 	rid := firstRefID(body)
+	e.target = "char-panel"
 	resp, body = e.post(storyBase+"/refs/"+rid+"/delete", nil, true)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "1 reference image") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "1 of 5") {
 		t.Fatalf("delete reference: %d", resp.StatusCode)
 	}
-}
-
-func allCharacterIDs(body string) []string {
-	var out []string
-	rest := body
-	for {
-		i := strings.Index(rest, `id="char-`)
-		if i < 0 {
-			return out
-		}
-		rest = rest[i+len(`id="char-`):]
-		out = append(out, rest[:strings.Index(rest, `"`)])
-	}
-}
-
-func firstCharacterID(body string) string {
-	i := strings.Index(body, `id="char-`)
-	rest := body[i+len(`id="char-`):]
-	return rest[:strings.Index(rest, `"`)]
-}
-
-func firstRefID(body string) string {
-	i := strings.Index(body, `id="ref-`)
-	rest := body[i+len(`id="ref-`):]
-	return rest[:strings.Index(rest, `"`)]
 }
 
 func TestCastRegistry(t *testing.T) {
@@ -524,34 +517,42 @@ func TestCastRegistry(t *testing.T) {
 	_, body = e.get(a + "/characters")
 	maraA := firstCharacterID(body)
 
-	// Story B with the same names: suggestions appear on every pending character.
+	// Story B with the same names: the roster hints at matches, the
+	// character page offers them.
 	resp, _ = e.post("/stories", url.Values{"title": {"Book Two"}, "script": {script}, "style": {"manga"}}, false)
 	b := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	_, body = e.get(b + "/characters")
-	if !strings.Contains(body, "Same Mara as in Book One?") || !strings.Contains(body, "Same Pip as in Book One?") {
-		t.Fatalf("expected name-based suggestions:\n%s", body)
+	if strings.Count(body, "Match in Book One") != 3 {
+		t.Fatalf("expected a match hint on every tile:\n%s", body)
 	}
 	maraB := firstCharacterID(body)
+	_, body = e.get(b + "/characters/" + maraB)
+	if !strings.Contains(body, "Same Mara as in Book One?") || !strings.Contains(body, "Reuse from another story") {
+		t.Fatalf("expected the suggestion on the character page:\n%s", body)
+	}
 
-	// The link dialog lists the registry (one entry per character).
+	// The link panel lists the registry (one entry per character).
 	_, body = e.get(b + "/characters/" + maraB + "/link")
-	if strings.Count(body, `class="link-row"`) != 3 {
-		t.Fatalf("link dialog should list 3 characters:\n%s", body)
+	if strings.Count(body, `class="link-row"`) != 3 || !strings.Contains(body, `class="side-panel"`) {
+		t.Fatalf("link panel should list 3 characters:\n%s", body)
 	}
 
 	// Link B's Mara to A's Mara: sheet copied, lineage shown, suggestion gone.
+	e.target = "char-panel"
 	resp, body = e.post(b+"/characters/"+maraB+"/link", url.Values{"source": {maraA}}, true)
+	e.target = ""
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "is now the same character") || !strings.Contains(body, "Copying the character") {
 		t.Fatalf("link: %d %s", resp.StatusCode, body)
 	}
 	e.waitIdle()
-	_, body = e.get(b + "/characters")
-	if strings.Count(body, `character sheet"`) != 1 || !strings.Contains(body, "Also in") || !strings.Contains(body, "Book One") {
-		t.Fatalf("linked character should carry the copied sheet and lineage:\n%s", body)
+	_, body = e.get(b + "/characters/" + maraB)
+	if !strings.Contains(body, `class="char__sheet-btn"`) || !strings.Contains(body, "Also in") || !strings.Contains(body, "Book One") || strings.Contains(body, "Same Mara as in") {
+		t.Fatalf("linked character should carry the copied sheet and lineage, and no suggestion:\n%s", body)
 	}
-	if strings.Contains(body, "Same Mara as in") || !strings.Contains(body, "Same Pip as in") {
-		t.Fatal("suggestion should disappear only for the linked character")
+	_, body = e.get(b + "/characters")
+	if strings.Count(body, `class="tile__avatar" src=`) != 1 || strings.Count(body, "Match in Book One") != 2 || !strings.Contains(body, "also in Book One") {
+		t.Fatal("roster should show one sheet, one lineage, two remaining hints")
 	}
 	if !strings.Contains(body, "Draw the remaining sheets") {
 		t.Fatal("toolbar should offer to draw the remaining sheets")
@@ -580,4 +581,27 @@ func TestCastRegistry(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("other user linked into someone else's story: %d", resp.StatusCode)
 	}
+}
+
+func allCharacterIDs(body string) []string {
+	var out []string
+	rest := body
+	for {
+		i := strings.Index(rest, `id="char-`)
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+len(`id="char-`):]
+		out = append(out, rest[:strings.Index(rest, `"`)])
+	}
+}
+func firstCharacterID(body string) string {
+	i := strings.Index(body, `id="char-`)
+	rest := body[i+len(`id="char-`):]
+	return rest[:strings.Index(rest, `"`)]
+}
+func firstRefID(body string) string {
+	i := strings.Index(body, `id="ref-`)
+	rest := body[i+len(`id="ref-`):]
+	return rest[:strings.Index(rest, `"`)]
 }

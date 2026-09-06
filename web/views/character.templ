@@ -1,0 +1,531 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/pictura/internal/store"
+)
+
+// MaxRefs is how many reference images one character may carry.
+const MaxRefs = 5
+
+// CharacterView is one character's page: the character, its neighbours
+// for the rail, and everything the page needs to render its state.
+type CharacterView struct {
+	Story     *store.Story
+	Character *store.Character
+	Cast      []*store.Character    // every character, for the rail and prev/next
+	CastJobs  map[int64]*store.Job  // latest job per character (rail status, own overlay)
+	StoryJob  *store.Job            // story-level job, if any
+	Refs      []*store.Ref          // this character's references
+	Matches   []store.LibraryEntry  // same-named characters from other stories
+	AlsoIn    []*store.Story        // other stories this character appears in
+	Editing   bool                  // render the details as an inline form
+	Working   bool                  // anything active on the story: keep polling
+}
+
+func (v CharacterView) job() *store.Job { return v.CastJobs[v.Character.ID] }
+
+func (v CharacterView) busy() bool { return v.job().Active() || v.StoryJob.Active() }
+
+func (v CharacterView) index() int {
+	for i, c := range v.Cast {
+		if c.ID == v.Character.ID {
+			return i
+		}
+	}
+	return 0
+}
+
+func (v CharacterView) prev() *store.Character {
+	if i := v.index(); i > 0 {
+		return v.Cast[i-1]
+	}
+	return nil
+}
+
+func (v CharacterView) next() *store.Character {
+	if i := v.index(); i < len(v.Cast)-1 {
+		return v.Cast[i+1]
+	}
+	return nil
+}
+
+func charURL(st *store.Story, c *store.Character) string {
+	return fmt.Sprintf("%s/characters/%d", base(st), c.ID)
+}
+
+// sheetStatus is the one-word state shown on tiles and in the rail.
+func sheetStatus(c *store.Character, job *store.Job) (label string, tone components.BadgeVariant) {
+	switch {
+	case job.Queued():
+		return "Waiting", components.BadgeOutline
+	case job.Running():
+		return "Working", components.BadgeDefault
+	case job != nil && job.Status == store.JobError:
+		return "Failed", components.BadgeDestructive
+	case c.SheetStatus == store.ImageReady:
+		return "Sheet ready", components.BadgeSuccess
+	case c.SheetStatus == store.ImageGenerating:
+		return "Drawing", components.BadgeDefault
+	case c.SheetStatus == store.ImageError:
+		return "Sheet failed", components.BadgeDestructive
+	}
+	return "Not drawn yet", components.BadgeOutline
+}
+
+// ---------- the roster (characters step) ----------
+
+templ roster(v CharactersView) {
+	<div class="roster">
+		for _, c := range v.Characters {
+			@tile(v, c)
+		}
+	</div>
+}
+
+templ tile(v CharactersView, c *store.Character) {
+	<a href={ charURL(v.Story, c) } class={ "panel panel--soft tile", templ.KV("tile--working", v.CharJobs[c.ID].Active()) } id={ fmt.Sprintf("char-%d", c.ID) }>
+		@avatar(c, "tile__avatar")
+		<div class="tile__body">
+			<div class="tile__name">{ c.Name }</div>
+			<div class="tile__meta">
+				if c.Role != "" {
+					<span>{ c.Role }</span>
+				}
+				if n := len(refsFor(v.Refs, c.ID)); n > 0 {
+					<span>{ plural(n, "reference", "references") }</span>
+				}
+				if len(v.Lineage[c.ID]) > 0 {
+					<span>{ "also in " + titleOr(v.Lineage[c.ID][0]) }</span>
+				}
+			</div>
+		</div>
+		<div class="tile__side">
+			if len(v.Suggestions[c.ID]) > 0 {
+				@components.Badge(components.BadgeSecondary, nil) {
+					{ "Match in " + titleOr(v.Suggestions[c.ID][0].Story) }
+				}
+			}
+			@statusBadge(c, v.CharJobs[c.ID])
+			@components.IconChevronRight()
+		</div>
+	</a>
+}
+
+templ statusBadge(c *store.Character, job *store.Job) {
+	{{ label, tone := sheetStatus(c, job) }}
+	@components.Badge(tone, nil) {
+		if job.Active() || c.SheetStatus == store.ImageGenerating {
+			@components.Spinner("sm", "")
+		}
+		{ label }
+	}
+}
+
+// avatar is the character's face for tiles and the rail: the sheet's
+// thumbnail when drawn, an initial otherwise.
+templ avatar(c *store.Character, class string) {
+	if c.SheetStatus == store.ImageReady && c.SheetImage != "" {
+		<img class={ class } src={ "/media/t/" + c.SheetImage } alt=""/>
+	} else {
+		<span class={ class + " avatar--blank" }>{ initials(c.Name) }</span>
+	}
+}
+
+// ---------- the character page ----------
+
+templ CharacterPage(v CharacterView) {
+	<div class="char-page">
+		@castRail(v)
+		@CharacterPanel(v)
+	</div>
+}
+
+templ castRail(v CharacterView) {
+	<nav class="rail" aria-label="Cast">
+		<a href={ base(v.Story) + "/characters" } class="rail__back">
+			@components.IconChevronLeft()
+			All characters
+		</a>
+		<ol class="rail__list">
+			for _, c := range v.Cast {
+				<li>
+					<a href={ charURL(v.Story, c) } class={ "rail__item", templ.KV("rail__item--current", c.ID == v.Character.ID) }>
+						@avatar(c, "rail__avatar")
+						<span class="rail__name">{ c.Name }</span>
+						{{ label, _ := sheetStatus(c, v.CastJobs[c.ID]) }}
+						<span class={ "rail__dot", "rail__dot--" + dotClass(label) } title={ label }></span>
+					</a>
+				</li>
+			}
+		</ol>
+	</nav>
+}
+
+func dotClass(label string) string {
+	switch label {
+	case "Sheet ready":
+		return "ready"
+	case "Working", "Drawing", "Waiting":
+		return "busy"
+	case "Failed", "Sheet failed":
+		return "failed"
+	}
+	return "pending"
+}
+
+// CharacterPanel is the polled main region of the character page.
+templ CharacterPanel(v CharacterView) {
+	if v.Working {
+		<div id="char-panel" class="char-main" hx-get={ charURL(v.Story, v.Character) + "/panel" } hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+			@characterMain(v)
+		</div>
+	} else {
+		<div id="char-panel" class="char-main">
+			@characterMain(v)
+		</div>
+	}
+}
+
+templ characterMain(v CharacterView) {
+	{{ c := v.Character }}
+	{{ job := v.job() }}
+	<header class="char-head">
+		<div>
+			<h1 class="char-head__name">{ c.Name }</h1>
+			<div class="char-head__meta">
+				if c.Role != "" {
+					@components.Badge(components.BadgeSecondary, nil) {
+						{ c.Role }
+					}
+				}
+				if c.Age != "" {
+					@components.Badge(components.BadgeOutline, nil) {
+						{ c.Age }
+					}
+				}
+				@statusBadge(c, job)
+				if len(v.AlsoIn) > 0 {
+					<span class="lineage">
+						@components.IconHistory()
+						Also in
+						for i, o := range v.AlsoIn {
+							if i > 0 {
+								,
+							}
+							<a href={ base(o) + "/characters" }>{ titleOr(o) }</a>
+						}
+					</span>
+				}
+			</div>
+		</div>
+		<div class="char-head__nav">
+			if p := v.prev(); p != nil {
+				@components.LinkButton(components.LinkButtonProps{Href: charURL(v.Story, p), Variant: components.ButtonGhost, Size: components.SizeSm}) {
+					@components.IconChevronLeft()
+					{ p.Name }
+				}
+			}
+			if n := v.next(); n != nil {
+				@components.LinkButton(components.LinkButtonProps{Href: charURL(v.Story, n), Variant: components.ButtonGhost, Size: components.SizeSm}) {
+					{ n.Name }
+					@components.IconChevronRight()
+				}
+			}
+		</div>
+	</header>
+	if v.StoryJob.Active() {
+		@JobBar(v.StoryJob)
+	}
+	if job != nil && job.Status == store.JobError {
+		@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "The last change to " + c.Name + " failed"}) {
+			{ job.Error }
+		}
+	}
+	if len(v.Matches) > 0 && !v.busy() {
+		@matchBox(v)
+	}
+	<div class="char-grid">
+		<section class="panel sheet-hero">
+			if job.Active() {
+				<div class="char__state char__state--busy sheet-hero__state">
+					<div>
+						@components.Spinner("lg", "")
+						if job.Queued() {
+							<div class="char__state-msg">Waiting its turn</div>
+							<div class="note">{ job.Message }</div>
+						} else {
+							<div class="char__state-msg">{ job.Message }</div>
+						}
+					</div>
+				</div>
+			} else if c.SheetStatus == store.ImageReady {
+				<button type="button" class="char__sheet-btn" hx-get={ charURL(v.Story, c) + "/view" } hx-target="#modal-root" aria-label={ "Open " + c.Name + "'s sheet" }>
+					<img src={ "/media/t/" + c.SheetImage } alt={ c.Name + " character sheet" }/>
+				</button>
+			} else if c.SheetStatus == store.ImageError {
+				<div class="char__state sheet-hero__state">
+					<div>
+						@components.IconAlertTriangle()
+						<div class="char__state-msg">The sheet failed</div>
+						<div class="note">{ c.SheetError }</div>
+					</div>
+				</div>
+			} else if c.SheetStatus == store.ImageGenerating {
+				<div class="char__state char__state--busy sheet-hero__state">
+					<div>
+						@components.Spinner("lg", "")
+						<div class="char__state-msg">Drawing the sheet</div>
+					</div>
+				</div>
+			} else {
+				<div class="char__state char__state--idle sheet-hero__state">
+					<span class="char__initial">{ initials(c.Name) }</span>
+					<span class="char__state-msg">Sheet not drawn yet</span>
+					<span class="note">Drawn with the rest of the cast, or on its own below.</span>
+				</div>
+			}
+			<div class="sheet-hero__actions">
+				if c.SheetStatus == store.ImageReady {
+					@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerHTML"}}) {
+						@components.IconRefreshCw()
+						Redraw
+					}
+				} else {
+					@components.Button(components.ButtonProps{Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerHTML"}}) {
+						@components.IconPalette()
+						Draw the sheet
+					}
+				}
+				<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/sheet" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+					<label class="ref-upload__pick btn btn--ghost btn--sm">
+						@components.IconDownload()
+						if c.SheetStatus == store.ImageReady {
+							Replace with my own
+						} else {
+							Upload a finished sheet
+						}
+						<input type="file" name="sheet" accept="image/*" class="visually-hidden" onchange="this.form.requestSubmit()" disabled?={ v.busy() }/>
+					</label>
+				</form>
+			</div>
+		</section>
+		<section class="panel details" id="char-details">
+			if v.Editing {
+				@CharacterEditForm(v.Story, c, "")
+			} else {
+				@characterDetails(v)
+			}
+		</section>
+	</div>
+	<section class="panel refs-section">
+		<div class="refs-head">
+			<h2 class="refs-head__title">Reference images</h2>
+			<span class="note">{ fmt.Sprintf("%d of %d. Photos, sketches, outfits or props %s should match; the sheet is drawn from them.", len(v.Refs), MaxRefs, c.Name) }</span>
+		</div>
+		if len(v.Refs) > 0 {
+			@refStripTarget(v.Story, v.Refs, v.busy(), "#char-panel")
+		}
+		if len(v.Refs) < MaxRefs {
+			<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/refs" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+				<label class="ref-upload__pick btn btn--outline btn--sm">
+					@components.IconPlus()
+					Add images
+					<input type="file" name="references" accept="image/*" multiple class="visually-hidden" onchange="this.form.requestSubmit()" disabled?={ v.busy() }/>
+				</label>
+				<span class="note">{ fmt.Sprintf("Up to %d more, 5 MB each.", MaxRefs-len(v.Refs)) }</span>
+			</form>
+		} else {
+			<span class="note">That's the limit. Remove one to add another.</span>
+		}
+	</section>
+	<div class="char-actions">
+		@components.Button(components.ButtonProps{Disabled: v.busy(), Attrs: templ.Attributes{"hx-get": charURL(v.Story, c) + "/adjust", "hx-target": "#panel-root", "hx-swap": "innerHTML"}}) {
+			@components.IconPencil()
+			Adjust with notes
+		}
+		if c.SheetStatus == store.ImagePending && c.OriginID == 0 {
+			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.busy(), Attrs: templ.Attributes{"hx-get": charURL(v.Story, c) + "/link", "hx-target": "#panel-root", "hx-swap": "innerHTML"}}) {
+				@components.IconUser()
+				Reuse from another story
+			}
+		}
+	</div>
+}
+
+templ characterDetails(v CharacterView) {
+	{{ c := v.Character }}
+	<div class="details__head">
+		<h2>Description</h2>
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-get": charURL(v.Story, c) + "/edit", "hx-target": "#char-details", "hx-swap": "innerHTML"}}) {
+			@components.IconPencil()
+			Edit
+		}
+	</div>
+	<dl class="details__list">
+		<dt>Looks</dt>
+		<dd>{ c.Visual }</dd>
+		<dt>Wears</dt>
+		<dd>{ c.Wardrobe }</dd>
+		<dt>Carries</dt>
+		<dd>{ c.Items }</dd>
+		<dt>Personality</dt>
+		<dd>{ c.Personality }</dd>
+	</dl>
+	<p class="note">Written by the editor from the script. Edit the words by hand, or ask for changes in plain language with "Adjust with notes".</p>
+}
+
+// CharacterEditForm replaces the description block in place.
+templ CharacterEditForm(st *store.Story, c *store.Character, err string) {
+	<form class="form details__form" hx-post={ charURL(st, c) + "/edit" } hx-target="#char-panel" hx-swap="outerHTML">
+		<div class="details__head">
+			<h2>Edit description</h2>
+		</div>
+		if err != "" {
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "Not saved"}) {
+				{ err }
+			}
+		}
+		<div class="grid grid--cols-1 grid--cols-md-3 gap-3">
+			@components.Field(components.FieldProps{ID: "f-name", Label: "Name", For: "name"}) {
+				@components.Input(components.InputProps{ID: "name", Name: "name", Value: c.Name, Attrs: templ.Attributes{"required": true, "autofocus": true}})
+			}
+			@components.Field(components.FieldProps{ID: "f-role", Label: "Role", For: "role"}) {
+				@components.Input(components.InputProps{ID: "role", Name: "role", Value: c.Role})
+			}
+			@components.Field(components.FieldProps{ID: "f-age", Label: "Age", For: "age"}) {
+				@components.Input(components.InputProps{ID: "age", Name: "age", Value: c.Age})
+			}
+		</div>
+		@components.Field(components.FieldProps{ID: "f-visual", Label: "Looks", For: "visual"}) {
+			@components.Textarea(components.TextareaProps{ID: "visual", Name: "visual", Value: c.Visual, Rows: 4})
+		}
+		@components.Field(components.FieldProps{ID: "f-wardrobe", Label: "Wears", For: "wardrobe"}) {
+			@components.Textarea(components.TextareaProps{ID: "wardrobe", Name: "wardrobe", Value: c.Wardrobe, Rows: 3})
+		}
+		@components.Field(components.FieldProps{ID: "f-items", Label: "Carries", For: "items"}) {
+			@components.Input(components.InputProps{ID: "items", Name: "items", Value: c.Items})
+		}
+		@components.Field(components.FieldProps{ID: "f-personality", Label: "Personality", For: "personality"}) {
+			@components.Textarea(components.TextareaProps{ID: "personality", Name: "personality", Value: c.Personality, Rows: 2})
+		}
+		if c.SheetStatus != store.ImagePending {
+			<label class="stack stack--row stack--align-center gap-2">
+				@components.Checkbox(components.CheckboxProps{ID: "redraw", Name: "redraw", Value: "1", Checked: true})
+				<span>Redraw the sheet if the look changed</span>
+			</label>
+		}
+		<div class="form__actions">
+			@components.Button(components.ButtonProps{Type: "submit"}) {
+				Save
+			}
+			@components.LinkButton(components.LinkButtonProps{Href: charURL(st, c), Variant: components.ButtonGhost}) {
+				Cancel
+			}
+		</div>
+	</form>
+}
+
+templ matchBox(v CharacterView) {
+	<div class="panel panel--pop suggest suggest--page">
+		for _, m := range v.Matches {
+			<div class="suggest__row">
+				if m.Character.SheetStatus == store.ImageReady {
+					<img class="suggest__img" src={ "/media/t/" + m.Character.SheetImage } alt=""/>
+				} else {
+					<span class="suggest__img suggest__img--blank">{ initials(m.Character.Name) }</span>
+				}
+				<div class="suggest__text">
+					<b>{ "Same " + m.Character.Name + " as in " + titleOr(m.Story) + "?" }</b>
+					<span class="note">
+						if m.Character.SheetStatus == store.ImageReady {
+							Reuse the look and the finished sheet. No redraw needed.
+						} else {
+							Reuse the look; the sheet still needs drawing.
+						}
+					</span>
+				</div>
+				<form hx-post={ charURL(v.Story, v.Character) + "/link" } hx-target="#char-panel" hx-swap="outerHTML">
+					<input type="hidden" name="source" value={ strconv.FormatInt(m.Character.ID, 10) }/>
+					@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm}) {
+						Yes, use this one
+					}
+				</form>
+			</div>
+		}
+	</div>
+}
+
+// ---------- side panels ----------
+
+// AdjustPanel takes notes and optional references, beside the character.
+templ AdjustPanel(v CharacterView) {
+	{{ c := v.Character }}
+	{{ room := MaxRefs - len(v.Refs) }}
+	@components.SidePanel(components.SidePanelProps{Title: "Adjust " + c.Name, Description: "Say what should change in plain words. The editor revises the description" + adjustTail(c) + "."}) {
+		<form class="form" hx-post={ charURL(v.Story, c) + "/adjust" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+			@FeedbackField("", "e.g. Shorter hair, a leather jacket instead of the coat, and she should look more tired.", "", false)
+			if room > 0 {
+				@components.FileUpload(components.FileUploadProps{ID: "references", Name: "references", Accept: "image/*", Multiple: true, Label: "Reference images (optional)", Help: fmt.Sprintf("Photos, sketches, outfits or props to match. Up to %d more, 5 MB each.", room)})
+			} else {
+				<p class="note">{ fmt.Sprintf("%s already has %d reference images, the limit. Remove one on the page to add another.", c.Name, MaxRefs) }</p>
+			}
+			<div class="form__actions">
+				@components.Button(components.ButtonProps{Type: "submit"}) {
+					if c.SheetStatus == store.ImagePending {
+						Revise
+					} else {
+						Revise and redraw
+					}
+				}
+				@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Attrs: templ.Attributes{"hx-get": "/panel/close", "hx-target": "#panel-root", "hx-swap": "innerHTML swap:0.25s"}}) {
+					Cancel
+				}
+			</div>
+		</form>
+	}
+}
+
+func adjustTail(c *store.Character) string {
+	if c.SheetStatus == store.ImagePending {
+		return ""
+	}
+	return " and redraws the sheet"
+}
+
+// LinkPanel lists the writer's registry beside the character.
+templ LinkPanel(v CharacterView, entries []store.LibraryEntry) {
+	{{ c := v.Character }}
+	@components.SidePanel(components.SidePanelProps{Title: "Is " + c.Name + " someone you already have?", Description: "The look, the references and the finished sheet are copied over, so the cast stays consistent across books."}) {
+		if len(entries) == 0 {
+			<p class="note">No characters from other stories yet. Once another story has a cast, it shows up here.</p>
+		} else {
+			<div class="link-list">
+				for _, e := range entries {
+					<div class="link-row">
+						@avatar(e.Character, "suggest__img")
+						<div class="suggest__text">
+							<b>{ e.Character.Name }</b>
+							<span class="note">{ e.Character.Role + " in " + titleOr(e.Story) }</span>
+						</div>
+						<form hx-post={ charURL(v.Story, c) + "/link" } hx-target="#char-panel" hx-swap="outerHTML">
+							<input type="hidden" name="source" value={ strconv.FormatInt(e.Character.ID, 10) }/>
+							@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm, Variant: components.ButtonOutline}) {
+								Use
+							}
+						</form>
+					</div>
+				}
+			</div>
+		}
+	}
+}
+
+// ClosePanel empties the side-panel slot out-of-band.
+templ ClosePanel() {
+	<div id="panel-root" hx-swap-oob="innerHTML"></div>
+}
