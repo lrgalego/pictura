@@ -156,7 +156,10 @@ CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
 	if err := s.addColumn("jobs", "character_id", "INTEGER"); err != nil {
 		return err
 	}
-	return s.addColumn("users", "enabled", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.addColumn("users", "enabled", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.addColumn("stories", "script_html", "TEXT NOT NULL DEFAULT ''")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -314,22 +317,23 @@ const (
 )
 
 type Story struct {
-	ID        int64
-	UserID    int64
-	Title     string
-	Logline   string
-	Script    string
-	Style     string
-	World     string
-	Step      int
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         int64
+	UserID     int64
+	Title      string
+	Logline    string
+	Script     string // plain text, what the models read
+	ScriptHTML string // the editor's sanitized HTML, so formatting survives re-editing
+	Style      string
+	World      string
+	Step       int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
-func (s *Store) CreateStory(ctx context.Context, userID int64, title, script, style string) (*Story, error) {
+func (s *Store) CreateStory(ctx context.Context, userID int64, title, script, scriptHTML, style string) (*Story, error) {
 	t := now()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO stories (user_id, title, script, style, step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		userID, title, script, style, StepScript, t, t)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO stories (user_id, title, script, script_html, style, step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, title, script, scriptHTML, style, StepScript, t, t)
 	if err != nil {
 		return nil, err
 	}
@@ -338,16 +342,18 @@ func (s *Store) CreateStory(ctx context.Context, userID int64, title, script, st
 }
 
 func (s *Store) Story(ctx context.Context, id int64) (*Story, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, user_id, title, logline, script, style, world, step, created_at, updated_at FROM stories WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+storyCols+` FROM stories WHERE id = ?`, id)
 	return scanStory(row)
 }
 
 type scanner interface{ Scan(dest ...any) error }
 
+const storyCols = `id, user_id, title, logline, script, script_html, style, world, step, created_at, updated_at`
+
 func scanStory(row scanner) (*Story, error) {
 	var st Story
 	var c, u string
-	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.Style, &st.World, &st.Step, &c, &u); err != nil {
+	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &c, &u); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -358,7 +364,7 @@ func scanStory(row scanner) (*Story, error) {
 }
 
 func (s *Store) StoriesByUser(ctx context.Context, userID int64) ([]*Story, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, user_id, title, logline, script, style, world, step, created_at, updated_at FROM stories WHERE user_id = ? ORDER BY updated_at DESC`, userID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+storyCols+` FROM stories WHERE user_id = ? ORDER BY updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -375,8 +381,8 @@ func (s *Store) StoriesByUser(ctx context.Context, userID int64) ([]*Story, erro
 }
 
 func (s *Store) UpdateStory(ctx context.Context, st *Story) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE stories SET title=?, logline=?, script=?, style=?, world=?, step=?, updated_at=? WHERE id=?`,
-		st.Title, st.Logline, st.Script, st.Style, st.World, st.Step, now(), st.ID)
+	_, err := s.db.ExecContext(ctx, `UPDATE stories SET title=?, logline=?, script=?, script_html=?, style=?, world=?, step=?, updated_at=? WHERE id=?`,
+		st.Title, st.Logline, st.Script, st.ScriptHTML, st.Style, st.World, st.Step, now(), st.ID)
 	return err
 }
 
@@ -1057,7 +1063,7 @@ type LibraryEntry struct {
 // The registry view groups them by Character.Origin().
 func (s *Store) Library(ctx context.Context, userID int64) ([]LibraryEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.story_id, c.position, c.name, c.role, c.age, c.visual, c.wardrobe, c.items, c.personality, c.sheet_image, c.sheet_status, c.sheet_error, COALESCE(c.origin_id, 0),
-		s.id, s.user_id, s.title, s.logline, s.script, s.style, s.world, s.step, s.created_at, s.updated_at
+		s.id, s.user_id, s.title, s.logline, s.script, s.script_html, s.style, s.world, s.step, s.created_at, s.updated_at
 		FROM characters c JOIN stories s ON s.id = c.story_id
 		WHERE s.user_id = ? ORDER BY c.id DESC`, userID)
 	if err != nil {
@@ -1070,7 +1076,7 @@ func (s *Store) Library(ctx context.Context, userID int64) ([]LibraryEntry, erro
 		var st Story
 		var created, updated string
 		if err := rows.Scan(&c.ID, &c.StoryID, &c.Position, &c.Name, &c.Role, &c.Age, &c.Visual, &c.Wardrobe, &c.Items, &c.Personality, &c.SheetImage, &c.SheetStatus, &c.SheetError, &c.OriginID,
-			&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.Style, &st.World, &st.Step, &created, &updated); err != nil {
+			&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &created, &updated); err != nil {
 			return nil, err
 		}
 		st.CreatedAt, st.UpdatedAt = parseTime(created), parseTime(updated)

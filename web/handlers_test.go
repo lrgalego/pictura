@@ -641,3 +641,42 @@ func TestMediaRedirectsToSignedURLs(t *testing.T) {
 		t.Fatal("media must stay owner-only")
 	}
 }
+
+func TestScriptEditorHTMLIsSanitizedAndKept(t *testing.T) {
+	e := newEnv(t)
+	e.signup("scribe")
+	// The editor posts HTML; the story keeps sanitized HTML and derives text.
+	html := "<p>" + strings.ReplaceAll(strings.TrimSpace(script), "\n\n", "</p><p>") + "</p><script>alert(1)</script>"
+	html = strings.ReplaceAll(html, "\n", "<br>")
+	resp, _ := e.post("/stories", url.Values{"script_html": {html}, "style": {"comic"}}, false)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("create from editor: %d", resp.StatusCode)
+	}
+	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
+	e.waitIdle()
+	_, body := e.get(base + "/script")
+	if strings.Contains(body, "<script>alert") || !strings.Contains(body, `class="editor__content"`) || !strings.Contains(body, "<p>THE LIGHTHOUSE KEEPER") {
+		t.Fatalf("script page should show the sanitized HTML in the editor:\n%s", body[strings.Index(body, "editor__content")-50:strings.Index(body, "editor__content")+300])
+	}
+	if !strings.Contains(body, "/stories/") || !strings.Contains(body, "/draft") {
+		t.Fatal("the editor autosaves to the draft endpoint")
+	}
+	for _, p := range []string{"/stories/draft", base + "/draft"} {
+		resp, _ = e.post(p, url.Values{"content": {"<p>x</p>"}}, true)
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	// A story saved before the editor still renders as paragraphs.
+	st, _ := e.st.Story(context.Background(), 1)
+	st.ScriptHTML = ""
+	_ = e.st.UpdateStory(context.Background(), st)
+	_, body = e.get(base + "/script")
+	if !strings.Contains(body, "<p>THE LIGHTHOUSE KEEPER") {
+		t.Fatal("legacy plain text should be rendered as paragraphs")
+	}
+	// The word count in the editor footer reflects the text.
+	if !strings.Contains(body, "words so far") {
+		t.Fatal("editor footer shows the word count")
+	}
+}

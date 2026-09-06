@@ -366,7 +366,10 @@ h1, h2, h3, .display {
 .err-page { padding: 4rem 0; text-align: center; }
 .err-page h1 { font-size: 3rem; }
 .hidden-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.script-form #script { font-family: var(--font-mono); font-size: 0.9rem; line-height: 1.5; min-height: 22rem; }
+.script-form .editor__content { font-family: var(--font-mono); font-size: 0.9rem; line-height: 1.55; min-height: 22rem; max-height: 70vh; }
+.script-form .editor__content p { margin: 0 0 0.75em; }
+.choice-set { border: 0; padding: 0; margin: 0; min-width: 0; }
+.choice-set > legend { padding: 0; margin-bottom: 0.4rem; }
 .note { font-size: var(--text-sm); color: var(--muted-foreground); }
 
 @media (prefers-reduced-motion: reduce) {

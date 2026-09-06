@@ -61,6 +61,8 @@ func Router(d Deps) http.Handler {
 	mux.Handle("GET /cast", auth(s.castLibrary))
 	mux.Handle("GET /stories/new", auth(s.newStoryPage))
 	mux.Handle("POST /stories", auth(s.createStory))
+	mux.Handle("POST /stories/draft", auth(s.draft))
+	mux.Handle("POST /stories/{id}/draft", auth(s.draft))
 	mux.Handle("GET /stories/{id}", auth(s.storyRedirect))
 	mux.Handle("GET /stories/{id}/script", auth(s.scriptPage))
 	mux.Handle("POST /stories/{id}/script", auth(s.updateScript))

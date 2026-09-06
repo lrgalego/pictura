@@ -50,7 +50,7 @@ func seed(t *testing.T, s *Store) (*User, *Story) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := s.CreateStory(ctx, u.ID, "Title", "script", "comic")
+	st, err := s.CreateStory(ctx, u.ID, "Title", "script", "", "comic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,9 +482,9 @@ func TestLibraryAndLink(t *testing.T) {
 	s, _ := open(t)
 	ctx := context.Background()
 	u, a := seed(t, s)
-	b, _ := s.CreateStory(ctx, u.ID, "Book Two", "script", "manga")
+	b, _ := s.CreateStory(ctx, u.ID, "Book Two", "script", "", "manga")
 	other, _ := s.CreateUser(ctx, "other", "Other", "h")
-	theirs, _ := s.CreateStory(ctx, other.ID, "Theirs", "script", "noir")
+	theirs, _ := s.CreateStory(ctx, other.ID, "Theirs", "script", "", "noir")
 	_ = s.InsertCharacter(ctx, &Character{StoryID: theirs.ID, Name: "Mara"})
 
 	src := &Character{StoryID: a.ID, Name: "Mara", Role: "hero", Age: "9", Visual: "freckles", Wardrobe: "coat", Items: "compass", Personality: "brave"}
@@ -514,7 +514,7 @@ func TestLibraryAndLink(t *testing.T) {
 		t.Fatalf("link should copy the character's references only: %+v", refs)
 	}
 	// Lineage chains: linking from a copy keeps the original origin.
-	c3, _ := s.CreateStory(ctx, u.ID, "Book Three", "script", "comic")
+	c3, _ := s.CreateStory(ctx, u.ID, "Book Three", "script", "", "comic")
 	third := &Character{StoryID: c3.ID, Name: "Mara"}
 	_ = s.InsertCharacter(ctx, third)
 	if err := s.LinkCharacter(ctx, third, got); err != nil {

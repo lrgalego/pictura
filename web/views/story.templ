@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/lrgalego/htmx-ds/components"
 
@@ -95,11 +96,19 @@ templ storyCard(c StoryCard) {
 
 // ScriptFormData is the new-story / edit-script form.
 type ScriptFormData struct {
-	Story  *store.Story
-	Title  string
-	Script string
-	Style  string
-	Error  string
+	Story      *store.Story
+	Title      string
+	Script     string // plain text
+	ScriptHTML string // sanitized editor HTML
+	Style      string
+	Error      string
+}
+
+func draftURL(f ScriptFormData) string {
+	if f.Story == nil {
+		return "/stories/draft"
+	}
+	return base(f.Story) + "/draft"
 }
 
 templ ScriptForm(f ScriptFormData) {
@@ -114,7 +123,7 @@ templ ScriptForm(f ScriptFormData) {
 		} else {
 			<p class="note">Changing the script or the look sends it back to the editor: the cast is found again and the pages are re-planned.</p>
 		}
-		<form class="form script-form" method="post" action={ scriptAction(f) }>
+		<form class="form script-form" method="post" action={ scriptAction(f) } onsubmit="this.elements.script_html.value = document.getElementById('script').innerHTML">
 			if f.Error != "" {
 				@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "Not quite yet"}) {
 					{ f.Error }
@@ -123,7 +132,7 @@ templ ScriptForm(f ScriptFormData) {
 			@components.Field(components.FieldProps{ID: "f-title", Label: "Title", For: "title", Help: "Leave it blank and the editor names the story from the script."}) {
 				@components.Input(components.InputProps{ID: "title", Name: "title", Value: f.Title, Placeholder: "The Lighthouse Keeper's Robot"})
 			}
-			<fieldset class="form">
+			<fieldset class="form choice-set">
 				<legend class="label">Look</legend>
 				<div class="styles">
 					for _, s := range pipeline.Styles {
@@ -139,8 +148,12 @@ templ ScriptForm(f ScriptFormData) {
 					}
 				</div>
 			</fieldset>
-			@components.Field(components.FieldProps{ID: "f-script", Label: "Script", For: "script", Help: "Screenplay format, prose, a bedtime story: anything with characters and scenes."}) {
-				@components.Textarea(components.TextareaProps{ID: "script", Name: "script", Value: f.Script, Rows: 18, Placeholder: "INT. LIGHTHOUSE. NIGHT.\n\nMARA (9, raincoat two sizes too big) climbs the last step. Something whirs in the dark.\n\nMARA: Hello?\nPIP: Please don't scream. I'm very easy to dent."})
+			@components.Field(components.FieldProps{ID: "f-script", Label: "Script", For: "script", Help: "Screenplay format, prose, a bedtime story: anything with characters and scenes. Paste from anywhere; formatting is kept for you, the editor reads the words."}) {
+				<input type="hidden" name="script_html" value=""/>
+				@components.Editor(components.EditorProps{ID: "script", ContentHTML: f.ScriptHTML, Placeholder: "INT. LIGHTHOUSE. NIGHT.  Mara climbs the last step. Something whirs in the dark…", URL: draftURL(f)}) {
+					<span class="note" id="script-count" data-count={ strconv.Itoa(len(strings.Fields(f.Script))) }>{ plural(len(strings.Fields(f.Script)), "word", "words") + " so far. Around 30 is the minimum." }</span>
+					@scriptCounter()
+				}
 			}
 			<div class="form__actions">
 				@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeLg}) {
@@ -1030,4 +1043,20 @@ templ refStrip(st *store.Story, refs []*store.Ref, busy bool, fragment bool) {
 			</div>
 		}
 	</div>
+}
+
+// scriptCounter keeps the editor footer's word count live while typing.
+templ scriptCounter() {
+	<script>
+		(function () {
+			var box = document.getElementById('script'), out = document.getElementById('script-count');
+			if (!box || !out) return;
+			var update = function () {
+				var n = (box.innerText || '').trim().split(/\s+/).filter(Boolean).length;
+				out.textContent = n + (n === 1 ? ' word' : ' words') + ' so far. Around 30 is the minimum.';
+			};
+			box.addEventListener('input', update);
+			update();
+		})();
+	</script>
 }

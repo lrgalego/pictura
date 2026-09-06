@@ -3,6 +3,9 @@ data/
 bin/
 coverage.out
 coverage.html
+# The 1Password service-account token — never committed; the engine refuses
+# to run if this is tracked or un-ignored.
+.op-token
 # Local-only env fallback; the workflow is op run with the committed .tpl files.
 .env
 .direnv/

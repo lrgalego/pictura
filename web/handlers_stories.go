@@ -114,14 +114,15 @@ func (s *server) saveRefs(r *http.Request, storyID, characterID int64, files []*
 }
 
 func (s *server) createStory(w http.ResponseWriter, r *http.Request) {
-	f := views.ScriptFormData{Title: field(r, "title"), Script: field(r, "script"), Style: field(r, "style")}
+	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
+	f := views.ScriptFormData{Title: field(r, "title"), Script: text, ScriptHTML: clean, Style: field(r, "style")}
 	if len(strings.Fields(f.Script)) < 30 {
 		f.Error = "Paste at least a few paragraphs — around 30 words is the minimum for a story worth drawing."
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(f)))
 		return
 	}
-	st, err := s.st.CreateStory(r.Context(), userFrom(r.Context()).ID, f.Title, f.Script, pipeline.StyleBySlug(f.Style).Slug)
+	st, err := s.st.CreateStory(r.Context(), userFrom(r.Context()).ID, f.Title, f.Script, f.ScriptHTML, pipeline.StyleBySlug(f.Style).Slug)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -146,7 +147,7 @@ func (s *server) scriptPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, Style: st.Style}
+	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, ScriptHTML: editorHTML(st), Style: st.Style}
 	render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepScript, views.ScriptForm(f))))
 }
 
@@ -155,7 +156,8 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: field(r, "script"), Style: field(r, "style")}
+	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
+	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: text, ScriptHTML: clean, Style: field(r, "style")}
 	status := http.StatusUnprocessableEntity
 	switch {
 	case len(strings.Fields(f.Script)) < 30:
@@ -170,7 +172,7 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	changed := f.Script != st.Script || f.Style != st.Style
-	st.Title, st.Script, st.Style = f.Title, f.Script, pipeline.StyleBySlug(f.Style).Slug
+	st.Title, st.Script, st.ScriptHTML, st.Style = f.Title, f.Script, f.ScriptHTML, pipeline.StyleBySlug(f.Style).Slug
 	if changed {
 		st.Step = store.StepScript
 	}
@@ -186,6 +188,22 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	redirect(w, r, fmt.Sprintf("/stories/%d/characters", st.ID))
+}
+
+// editorHTML is what the editor shows for a story: its saved HTML, or the
+// plain text rendered as paragraphs for stories saved before the editor.
+func editorHTML(st *store.Story) string {
+	if st.ScriptHTML != "" {
+		return st.ScriptHTML
+	}
+	return htmlFromText(st.Script)
+}
+
+// draft is the editor's autosave target. The script only becomes the
+// story's script when the form is submitted, so this acknowledges and
+// keeps nothing; it exists because the editor posts on blur regardless.
+func (s *server) draft(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) deleteDialog(w http.ResponseWriter, r *http.Request) {

@@ -75,7 +75,7 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(func() { st.Close() })
 	ctx := context.Background()
 	u, _ := st.CreateUser(ctx, "w", "W", "h")
-	sto, _ := st.CreateStory(ctx, u.ID, "", script, "comic")
+	sto, _ := st.CreateStory(ctx, u.ID, "", script, "", "comic")
 	ai := &flaky{AI: &pipeline.Fake{}}
 	return &env{t: t, st: st, ai: ai, r: New(st, ai, 0), ctx: ctx, sto: sto}
 }
@@ -607,7 +607,7 @@ func TestLinkAndSetSheetAreQueued(t *testing.T) {
 	_ = e.r.Analyze(e.sto.ID)
 	e.mustDone("analyze")
 	u, _ := e.st.UserByUsername(e.ctx, "w")
-	other, _ := e.st.CreateStory(e.ctx, u.ID, "Other", script, "noir")
+	other, _ := e.st.CreateStory(e.ctx, u.ID, "Other", script, "", "noir")
 	src := &store.Character{StoryID: other.ID, Name: "Mara", Visual: "from elsewhere"}
 	_ = e.st.InsertCharacter(e.ctx, src)
 	name, _ := e.st.SaveImage(e.ctx, other.ID, "png", tinyPNG())

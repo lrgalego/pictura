@@ -11,7 +11,7 @@ implementation detail for the git hooks, not an interface.
 | regenerate templ code | `shipyard generate` |
 | verify the machine | `shipyard doctor` |
 | set up a new machine | `shipyard setup` (then install the 1Password CLI natively) |
-| deploy | `git push origin main` then `shipyard deploy` |
+| deploy | `git push origin main` then `shipyard deploy` (prompt-free once `.op-token` exists) |
 | roll back | `shipyard rollback <tag>` — seconds, no rebuild, no vault |
 | what is live | `shipyard status` |
 | server logs | `shipyard logs [-f] [-n N]` |
