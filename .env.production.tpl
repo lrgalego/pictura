@@ -19,7 +19,7 @@ SHIPYARD_REGISTRY_TOKEN=op://pictura/github-registry/token
 # a Cloudflare R2 bucket and serves it through short-lived signed URLs, so
 # the VM's disk and the tunnel never carry image bytes. Leave them unset to
 # keep images on the machine under /data/images.
-# R2_ACCOUNT_ID=op://pictura/cloudflare-r2/account id
-# R2_ACCESS_KEY_ID=op://pictura/cloudflare-r2/access key id
-# R2_SECRET_ACCESS_KEY=op://pictura/cloudflare-r2/secret access key
-# R2_BUCKET=pictura-media
+R2_ACCOUNT_ID=op://pictura/cloudflare-r2/account id
+R2_ACCESS_KEY_ID=op://pictura/cloudflare-r2/access key id
+R2_SECRET_ACCESS_KEY=op://pictura/cloudflare-r2/secret access key
+R2_BUCKET=pictura-media
