@@ -55,3 +55,7 @@ tunnel_id = "f17e8a1f-a62d-4077-ac4f-c5f982fe7fb5"
 
 [secrets]
 provider = "op"
+# Every op:// address in the tpl files lives in this vault; the service
+# account below is granted exactly this vault, so deploys never prompt.
+vault    = "pictura"
+service_account = "op://pictura/service-account/credential"

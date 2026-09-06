@@ -11,4 +11,4 @@
 #   op run --env-file=.env.dev.tpl -- go run ./cmd/server
 #   op run --env-file=.env.dev.tpl -- $SHELL      # a whole session
 #
-META_API_KEY=op://pictura/meta-ai-api/credential
+META_API_KEY=op://pictura/meta-ai-api-dev/credential

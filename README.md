@@ -42,7 +42,9 @@ op run --env-file=.env.dev.tpl -- ./bin/server --host 0.0.0.0 --port 8787 --data
 ```
 
 In production `shipyard deploy` resolves `.env.production.tpl` the same way
-and streams the value to the machine. Without a key the server starts in
+and streams the value to the machine. Both resolve through a 1Password
+service account granted the `pictura` vault, whose token `shipyard setup`
+writes once to the git-ignored `.op-token`, so nothing ever prompts. Without a key the server starts in
 placeholder-art mode so the whole workflow can be exercised for free.
 
 Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.

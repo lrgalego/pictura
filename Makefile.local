@@ -2,9 +2,11 @@
 
 # Local server reachable from other devices on the network (phone testing).
 # The Meta API key is resolved from 1Password for the lifetime of the process
-# (see .env.dev.tpl); nothing is written to disk.
+# (see .env.dev.tpl); nothing is written to disk. With the service-account
+# token in .op-token (written by shipyard setup) this never prompts.
+OP_TOKEN = $(shell test -s .op-token && cat .op-token)
 dev: generate
-	op run --env-file=.env.dev.tpl -- $(GO) run ./cmd/server --host 0.0.0.0 --port $(PORT) --data ./data
+	OP_SERVICE_ACCOUNT_TOKEN="$(OP_TOKEN)" op run --env-file=.env.dev.tpl -- $(GO) run ./cmd/server --host 0.0.0.0 --port $(PORT) --data ./data
 
 # Same, but never touches the Meta API (placeholder art).
 dev-fake: generate
