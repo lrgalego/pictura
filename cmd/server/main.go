@@ -15,6 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"path/filepath"
+
+	"github.com/lrgalego/pictura/internal/blob"
 	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/meta"
 	"github.com/lrgalego/pictura/internal/pipeline"
@@ -32,6 +35,7 @@ func main() {
 	enableUser := flag.String("enable-user", "", "enable this account and exit (signing up does not enable an account)")
 	disableUser := flag.String("disable-user", "", "disable this account and exit")
 	listUsers := flag.Bool("list-users", false, "print every account with its enabled flag and exit")
+	migrate := flag.Bool("migrate-blobs", false, "copy every image from <data>/images into the configured R2 bucket and exit")
 	flag.Parse()
 
 	if *healthCheck {
@@ -40,17 +44,27 @@ func main() {
 
 	loadEnvFile(*envFile)
 
-	st, err := store.Open(*dataDir)
+	blobs, r2 := blobStore(*dataDir)
+	st, err := store.Open(*dataDir, blobs)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
+
+	if *migrate {
+		os.Exit(migrateBlobs(st, *dataDir, r2))
+	}
 
 	if *enableUser != "" || *disableUser != "" || *listUsers {
 		os.Exit(manageUsers(st, *enableUser, *disableUser, *listUsers))
 	}
 	if err := st.FailRunningJobs(context.Background()); err != nil {
 		log.Printf("reset jobs: %v", err)
+	}
+	if n, err := st.Sweep(context.Background(), 0); err != nil {
+		log.Printf("sweep: %v", err)
+	} else if n > 0 {
+		log.Printf("sweep: reclaimed %d orphaned image(s)", n)
 	}
 
 	var ai pipeline.AI
@@ -110,6 +124,72 @@ func loadEnvFile(path string) {
 			os.Setenv(k, v)
 		}
 	}
+}
+
+// blobStore picks where image bytes live: Cloudflare R2 when R2_* is set
+// (production), files under the data dir otherwise. The R2 handle is
+// returned separately for the migration command.
+func blobStore(dataDir string) (blob.Store, *blob.R2) {
+	cfg := blob.R2Config{
+		AccountID:       os.Getenv("R2_ACCOUNT_ID"),
+		AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
+		SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+		Bucket:          os.Getenv("R2_BUCKET"),
+	}
+	if cfg.Bucket == "" {
+		return nil, nil
+	}
+	r2, err := blob.NewR2(cfg)
+	if err != nil {
+		log.Fatalf("r2: %v", err)
+	}
+	log.Printf("images: Cloudflare R2 bucket %s", cfg.Bucket)
+	return r2, r2
+}
+
+// migrateBlobs copies the on-disk images into R2, skipping names R2
+// already holds, so it can be re-run. Files are left in place; delete the
+// directory once the app runs on R2.
+func migrateBlobs(st *store.Store, dataDir string, r2 *blob.R2) int {
+	if r2 == nil {
+		fmt.Fprintln(os.Stderr, "set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET first")
+		return 1
+	}
+	ctx := context.Background()
+	fs, err := blob.NewFS(filepath.Join(dataDir, "images"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	names, err := st.ImageNames(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	copied, skipped := 0, 0
+	for _, n := range names {
+		for _, key := range []string{n, store.ThumbName(n)} {
+			if !fs.Exists(key) {
+				continue
+			}
+			if _, err := r2.Get(ctx, key); err == nil {
+				skipped++
+				continue
+			}
+			data, err := fs.Get(ctx, key)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", key, err)
+				return 1
+			}
+			if err := r2.Put(ctx, key, data); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", key, err)
+				return 1
+			}
+			copied++
+		}
+	}
+	fmt.Printf("migrated %d object(s) to R2, %d already there, %d image(s) in the database\n", copied, skipped, len(names))
+	return 0
 }
 
 // manageUsers is the operator's switch until there is an admin screen:

@@ -24,20 +24,30 @@ import (
 	_ "image/gif"
 	"image/png"
 	_ "modernc.org/sqlite"
+
+	"github.com/lrgalego/pictura/internal/blob"
 )
 
 var ErrNotFound = errors.New("not found")
 
-// Store wraps the database and the image directory.
+// Store wraps the database and the blob store holding the image bytes.
 type Store struct {
-	db     *sql.DB
-	images string
+	db    *sql.DB
+	blobs blob.Store
 }
 
-// Open opens (or creates) the database at path and the images dir beside it.
-func Open(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dataDir, "images"), 0o755); err != nil {
+// Open opens (or creates) the database under dataDir. blobs is where image
+// bytes go; nil means files under dataDir/images.
+func Open(dataDir string, blobs blob.Store) (*Store, error) {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
+	}
+	if blobs == nil {
+		fs, err := blob.NewFS(filepath.Join(dataDir, "images"))
+		if err != nil {
+			return nil, err
+		}
+		blobs = fs
 	}
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", filepath.Join(dataDir, "pictura.db"))
 	db, err := sql.Open("sqlite", dsn)
@@ -45,7 +55,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, images: filepath.Join(dataDir, "images")}
+	s := &Store{db: db, blobs: blobs}
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -53,6 +63,9 @@ func Open(dataDir string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// Blobs is the byte store behind the image names.
+func (s *Store) Blobs() blob.Store { return s.blobs }
 
 func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
@@ -390,10 +403,16 @@ func (s *Store) DeleteStory(ctx context.Context, id int64) error {
 		return err
 	}
 	for _, n := range names {
-		_ = os.Remove(filepath.Join(s.images, n))
-		_ = os.Remove(filepath.Join(s.images, n+".thumb.jpg"))
+		s.dropBlob(ctx, n)
 	}
 	return nil
+}
+
+// dropBlob removes an image and its thumbnail from the blob store; a
+// missing object is not an error.
+func (s *Store) dropBlob(ctx context.Context, name string) {
+	_ = s.blobs.Delete(ctx, name)
+	_ = s.blobs.Delete(ctx, ThumbName(name))
 }
 
 // ---------- characters ----------
@@ -486,11 +505,19 @@ func (s *Store) SetCharacterSheet(ctx context.Context, id int64, image, status, 
 }
 
 func (s *Store) DeleteCharacters(ctx context.Context, storyID int64) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM refs WHERE story_id = ?`, storyID); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM characters WHERE story_id = ?`, storyID)
 	return err
 }
 
+// DeleteCharacter removes a character and its references; the blobs are
+// reclaimed by the next Sweep.
 func (s *Store) DeleteCharacter(ctx context.Context, id int64) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM refs WHERE character_id = ?`, id); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM characters WHERE id = ?`, id)
 	return err
 }
@@ -745,15 +772,18 @@ func (s *Store) FailRunningJobs(ctx context.Context) error {
 // grids and covers load that instead of the multi-megabyte original.
 const ThumbWidth = 640
 
-// SaveImage writes an image file (and its thumbnail) owned by a story and
+// ThumbName is the blob name of an image's thumbnail.
+func ThumbName(name string) string { return name + ".thumb.jpg" }
+
+// SaveImage stores an image (and its thumbnail) owned by a story and
 // returns its name.
 func (s *Store) SaveImage(ctx context.Context, storyID int64, ext string, data []byte) (string, error) {
 	name := randomHex(12) + "." + ext
-	if err := os.WriteFile(filepath.Join(s.images, name), data, 0o644); err != nil {
+	if err := s.blobs.Put(ctx, name, data); err != nil {
 		return "", err
 	}
 	if thumb, err := makeThumb(data); err == nil {
-		_ = os.WriteFile(filepath.Join(s.images, name+".thumb.jpg"), thumb, 0o644)
+		_ = s.blobs.Put(ctx, ThumbName(name), thumb)
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO images (name, story_id) VALUES (?, ?)`, name, storyID); err != nil {
 		return "", err
@@ -761,29 +791,16 @@ func (s *Store) SaveImage(ctx context.Context, storyID int64, ext string, data [
 	return name, nil
 }
 
-// ImagePath returns the on-disk path of an image and the story that owns it.
-func (s *Store) ImagePath(ctx context.Context, name string) (string, int64, error) {
+// ImageOwner returns the story that owns an image name, or ErrNotFound.
+func (s *Store) ImageOwner(ctx context.Context, name string) (int64, error) {
 	if strings.ContainsAny(name, "/\\") || name == "" {
-		return "", 0, ErrNotFound
+		return 0, ErrNotFound
 	}
 	var storyID int64
 	if err := s.db.QueryRowContext(ctx, `SELECT story_id FROM images WHERE name = ?`, name).Scan(&storyID); err != nil {
-		return "", 0, ErrNotFound
+		return 0, ErrNotFound
 	}
-	return filepath.Join(s.images, name), storyID, nil
-}
-
-// ThumbPath returns the on-disk path of an image's thumbnail, falling back
-// to the original when none was written.
-func (s *Store) ThumbPath(ctx context.Context, name string) (string, int64, error) {
-	p, storyID, err := s.ImagePath(ctx, name)
-	if err != nil {
-		return "", 0, err
-	}
-	if _, err := os.Stat(p + ".thumb.jpg"); err == nil {
-		return p + ".thumb.jpg", storyID, nil
-	}
-	return p, storyID, nil
+	return storyID, nil
 }
 
 func makeThumb(data []byte) ([]byte, error) {
@@ -809,11 +826,77 @@ func makeThumb(data []byte) ([]byte, error) {
 
 // ReadImage returns the bytes of an image by name.
 func (s *Store) ReadImage(ctx context.Context, name string) ([]byte, error) {
-	p, _, err := s.ImagePath(ctx, name)
+	if _, err := s.ImageOwner(ctx, name); err != nil {
+		return nil, err
+	}
+	return s.blobs.Get(ctx, name)
+}
+
+// ReadThumb returns the thumbnail's bytes, falling back to the original.
+func (s *Store) ReadThumb(ctx context.Context, name string) ([]byte, string, error) {
+	if _, err := s.ImageOwner(ctx, name); err != nil {
+		return nil, "", err
+	}
+	if b, err := s.blobs.Get(ctx, ThumbName(name)); err == nil {
+		return b, ThumbName(name), nil
+	}
+	b, err := s.blobs.Get(ctx, name)
+	return b, name, err
+}
+
+// ImageNames lists every stored image name (for migrations).
+func (s *Store) ImageNames(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM images ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(p)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// Sweep is the garbage collector: it deletes every image the story owns
+// that no character sheet, page or reference points at any more (art that
+// was redrawn, references removed with their character), and returns how
+// many were reclaimed. storyID 0 sweeps every story.
+func (s *Store) Sweep(ctx context.Context, storyID int64) (int, error) {
+	q := `SELECT name FROM images i
+		WHERE NOT EXISTS (SELECT 1 FROM characters c WHERE c.sheet_image = i.name)
+		  AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.image = i.name)
+		  AND NOT EXISTS (SELECT 1 FROM refs r WHERE r.image = i.name)`
+	args := []any{}
+	if storyID != 0 {
+		q += ` AND i.story_id = ?`
+		args = append(args, storyID)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	var orphans []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		orphans = append(orphans, n)
+	}
+	rows.Close()
+	for _, n := range orphans {
+		s.dropBlob(ctx, n)
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM images WHERE name = ?`, n); err != nil {
+			return 0, err
+		}
+	}
+	return len(orphans), nil
 }
 
 func (s *Store) imageNames(ctx context.Context, storyID int64) ([]string, error) {
@@ -927,8 +1010,7 @@ func (s *Store) DeleteRef(ctx context.Context, id int64) error {
 		return err
 	}
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM images WHERE name = ?`, r.Image)
-	_ = os.Remove(filepath.Join(s.images, r.Image))
-	_ = os.Remove(filepath.Join(s.images, r.Image+".thumb.jpg"))
+	s.dropBlob(ctx, r.Image)
 	return nil
 }
 
@@ -1035,14 +1117,10 @@ func (s *Store) LinkCharacter(ctx context.Context, dst, src *Character) error {
 	return nil
 }
 
-// copyImage duplicates a stored image (and its thumbnail) under a new name
-// owned by another story.
+// copyImage duplicates a stored image (thumbnail regenerated) under a new
+// name owned by another story.
 func (s *Store) copyImage(ctx context.Context, name string, storyID int64) (string, error) {
-	src, _, err := s.ImagePath(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(src)
+	data, err := s.ReadImage(ctx, name)
 	if err != nil {
 		return "", err
 	}

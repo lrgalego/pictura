@@ -68,7 +68,7 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := store.Open(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,8 +467,7 @@ func TestReferencesOnlyReadyOnes(t *testing.T) {
 	}
 	// A ref whose file vanished is skipped, not fatal.
 	r, _ := e.st.InsertRef(e.ctx, e.sto.ID, chars[0].ID, "a.png", "", tinyPNG())
-	p, _, _ := e.st.ImagePath(e.ctx, r.Image)
-	_ = removeFile(p)
+	_ = e.st.Blobs().Delete(e.ctx, r.Image)
 	pr, _, err = e.r.references(e.ctx, e.sto.ID, chars[0].ID)
 	if err != nil || len(pr) != 0 {
 		t.Fatalf("missing file should be skipped: %v %v", pr, err)
@@ -484,8 +483,6 @@ func TestConcurrencyLimitDefaultsToOne(t *testing.T) {
 		t.Fatal("Elapsed should measure since creation")
 	}
 }
-
-func removeFile(p string) error { return osRemove(p) }
 
 // blocking holds every model call until released.
 type blocking struct {

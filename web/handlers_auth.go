@@ -8,6 +8,7 @@ import (
 	"github.com/lrgalego/htmx-ds/layout"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/lrgalego/pictura/internal/blob"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
 )
@@ -122,30 +123,58 @@ func (s *server) pending(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// media serves a generated image, only to the story's owner.
+// media serves a generated image, only to the story's owner. When the blob
+// store can hand out a direct URL (R2), the browser is sent there so the
+// bytes never cross the VM; otherwise the app streams them.
 func (s *server) media(w http.ResponseWriter, r *http.Request) {
-	path, storyID, err := s.st.ImagePath(r.Context(), r.PathValue("name"))
-	s.serveOwned(w, r, path, storyID, err)
+	name := r.PathValue("name")
+	if !s.ownsImage(r, name) {
+		http.NotFound(w, r)
+		return
+	}
+	s.serveBlob(w, r, name, func() ([]byte, string, error) {
+		b, err := s.st.ReadImage(r.Context(), name)
+		return b, name, err
+	})
 }
 
 // thumb serves the grid-sized JPEG of an image.
 func (s *server) thumb(w http.ResponseWriter, r *http.Request) {
-	path, storyID, err := s.st.ThumbPath(r.Context(), r.PathValue("name"))
-	s.serveOwned(w, r, path, storyID, err)
+	name := r.PathValue("name")
+	if !s.ownsImage(r, name) {
+		http.NotFound(w, r)
+		return
+	}
+	s.serveBlob(w, r, store.ThumbName(name), func() ([]byte, string, error) {
+		return s.st.ReadThumb(r.Context(), name)
+	})
 }
 
-func (s *server) serveOwned(w http.ResponseWriter, r *http.Request, path string, storyID int64, err error) {
+func (s *server) ownsImage(r *http.Request, name string) bool {
+	storyID, err := s.st.ImageOwner(r.Context(), name)
+	if err != nil {
+		return false
+	}
+	st, err := s.st.Story(r.Context(), storyID)
+	return err == nil && st.UserID == userFrom(r.Context()).ID
+}
+
+func (s *server) serveBlob(w http.ResponseWriter, r *http.Request, name string, read func() ([]byte, string, error)) {
+	if url, err := s.st.Blobs().URL(r.Context(), name); err == nil && url != "" {
+		// The signed URL outlives this hint, so a browser may reuse the
+		// redirect for a few minutes without asking again.
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		http.Redirect(w, r, url, http.StatusFound)
+		return
+	}
+	b, served, err := read()
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	st, err := s.st.Story(r.Context(), storyID)
-	if err != nil || st.UserID != userFrom(r.Context()).ID {
-		http.NotFound(w, r)
-		return
-	}
+	w.Header().Set("Content-Type", blob.ContentType(served))
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	http.ServeFile(w, r, path)
+	_, _ = w.Write(b)
 }
 
 var _ = store.ErrNotFound

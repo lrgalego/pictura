@@ -47,6 +47,25 @@ placeholder-art mode so the whole workflow can be exercised for free.
 
 Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.
 
+## Images
+
+Every generated image and upload goes through one blob store
+(`internal/blob`): files under `<data>/images` by default, or a Cloudflare
+R2 bucket when `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+and `R2_BUCKET` are set. On R2 the browser fetches images through
+short-lived signed URLs, so neither the VM nor the tunnel carries the bytes.
+The database only ever holds names.
+
+A garbage collector reclaims superseded art: after every job, and once at
+startup, images no character sheet, page or reference points at any more are
+deleted. Redrawing a sheet or a page therefore frees the previous one.
+
+Moving an existing installation to R2, once the bucket and token exist:
+
+```sh
+./bin/server --data ./data --migrate-blobs   # with the R2_* variables set; re-runnable
+```
+
 ## Enabling accounts
 
 There is no admin screen yet. The server binary doubles as the switch; run it

@@ -78,7 +78,7 @@ func TestMain(m *testing.M) {
 	}
 
 	dir, _ := os.MkdirTemp("", "pictura-e2e")
-	st, err := store.Open(dir)
+	st, err := store.Open(dir, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

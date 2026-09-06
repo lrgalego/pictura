@@ -167,6 +167,13 @@ func (r *Runner) execute(storyID int64, t *task) {
 	}
 	_ = r.st.FinishJob(ctx, t.job.ID, msg)
 	_ = r.st.Touch(ctx, storyID)
+	// Reclaim whatever this job made obsolete: the previous sheet or page
+	// art, references of a dropped character.
+	if n, err := r.st.Sweep(ctx, storyID); err != nil {
+		log.Printf("sweep story %d: %v", storyID, err)
+	} else if n > 0 {
+		log.Printf("sweep story %d: reclaimed %d image(s)", storyID, n)
+	}
 
 	r.mu.Lock()
 	if t.charID == 0 {

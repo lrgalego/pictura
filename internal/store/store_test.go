@@ -35,7 +35,7 @@ func testJPEG(w, h int) []byte {
 func open(t *testing.T) (*Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := Open(dir)
+	s, err := Open(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,18 +59,18 @@ func seed(t *testing.T, s *Store) (*User, *Story) {
 
 func TestOpenIsIdempotentAndMigrates(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Open(dir)
+	s, err := Open(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
 	// Reopening runs the migration again, including addColumn's no-op path.
-	s, err = Open(dir)
+	s, err = Open(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
-	if _, err := Open(filepath.Join(dir, "missing", "\x00bad")); err == nil {
+	if _, err := Open(filepath.Join(dir, "missing", "\x00bad"), nil); err == nil {
 		t.Fatal("expected an error for an unusable data dir")
 	}
 }
@@ -191,28 +191,36 @@ func TestCharactersPagesAndImages(t *testing.T) {
 	if err := s.SetCharacterSheet(ctx, c.ID, name, ImageReady, ""); err != nil {
 		t.Fatal(err)
 	}
-	thumb, storyID, err := s.ThumbPath(ctx, name)
-	if err != nil || storyID != st.ID || filepath.Ext(thumb) != ".jpg" {
-		t.Fatalf("thumb: %s %d %v", thumb, storyID, err)
+	if owner, err := s.ImageOwner(ctx, name); err != nil || owner != st.ID {
+		t.Fatalf("owner: %d %v", owner, err)
 	}
-	if _, _, err := s.ImagePath(ctx, "../etc/passwd"); err != ErrNotFound {
+	if thumb, served, err := s.ReadThumb(ctx, name); err != nil || served != ThumbName(name) || len(thumb) == 0 {
+		t.Fatalf("thumb: %s %d %v", served, len(thumb), err)
+	}
+	if _, err := s.ImageOwner(ctx, "../etc/passwd"); err != ErrNotFound {
 		t.Fatal("path traversal should be ErrNotFound")
 	}
-	if _, _, err := s.ImagePath(ctx, "unknown.png"); err != ErrNotFound {
+	if _, err := s.ImageOwner(ctx, "unknown.png"); err != ErrNotFound {
 		t.Fatal("unknown image should be ErrNotFound")
 	}
 	if _, err := s.ReadImage(ctx, "unknown.png"); err == nil {
 		t.Fatal("reading an unknown image should fail")
 	}
+	if _, _, err := s.ReadThumb(ctx, "unknown.png"); err == nil {
+		t.Fatal("reading an unknown thumb should fail")
+	}
 	// A small image gets a thumbnail without upscaling.
 	small, _ := s.SaveImage(ctx, st.ID, "png", testPNG(100, 50))
-	if p, _, _ := s.ThumbPath(ctx, small); filepath.Ext(p) != ".jpg" {
+	if _, served, _ := s.ReadThumb(ctx, small); served != ThumbName(small) {
 		t.Fatal("small images still get a thumbnail")
 	}
-	// A non-image payload is stored but gets no thumbnail: ThumbPath falls back.
+	// A non-image payload is stored but gets no thumbnail: ReadThumb falls back.
 	raw, _ := s.SaveImage(ctx, st.ID, "bin", []byte("not an image"))
-	if p, _, _ := s.ThumbPath(ctx, raw); filepath.Ext(p) != ".bin" {
+	if b, served, err := s.ReadThumb(ctx, raw); err != nil || served != raw || string(b) != "not an image" {
 		t.Fatal("fallback to the original when no thumbnail exists")
+	}
+	if names, _ := s.ImageNames(ctx); len(names) != 3 {
+		t.Fatalf("image names: %v", names)
 	}
 
 	p := &Page{StoryID: st.ID, Number: 1, Title: "One", Panels: []Panel{{Number: 1, Description: "d", Characters: []string{"Mara"}, Dialogue: []Line{{"Mara", "hi"}}}}}
@@ -244,10 +252,35 @@ func TestCharactersPagesAndImages(t *testing.T) {
 		t.Fatal("missing character should be ErrNotFound")
 	}
 
+	// The sweep reclaims the small image (unreferenced) and the raw blob,
+	// keeps the sheet and the page's image, and removes nothing else.
+	if n, err := s.Sweep(ctx, st.ID); err != nil || n != 2 {
+		t.Fatalf("sweep: %d %v", n, err)
+	}
+	if _, err := s.ReadImage(ctx, small); err == nil {
+		t.Fatal("swept image should be gone")
+	}
+	if _, err := s.ReadImage(ctx, name); err != nil {
+		t.Fatal("referenced image must survive the sweep")
+	}
+	if n, _ := s.Sweep(ctx, 0); n != 0 {
+		t.Fatalf("second sweep should find nothing, got %d", n)
+	}
+	// A redraw makes the previous sheet an orphan for the next sweep — but
+	// only once nothing else (here, the page) points at it.
+	newer, _ := s.SaveImage(ctx, st.ID, "png", testPNG(30, 20))
+	_ = s.SetCharacterSheet(ctx, c.ID, newer, ImageReady, "")
+	if n, _ := s.Sweep(ctx, st.ID); n != 0 {
+		t.Fatalf("an image still used by a page must survive, swept %d", n)
+	}
+	_ = s.SetPageImage(ctx, p.ID, newer, ImageReady, "")
+	if n, _ := s.Sweep(ctx, st.ID); n != 1 {
+		t.Fatalf("redraw should orphan the old sheet, swept %d", n)
+	}
 	// Deleting the story removes files, thumbnails and every row.
 	files, _ := os.ReadDir(filepath.Join(dir, "images"))
-	if len(files) < 4 {
-		t.Fatalf("expected images on disk, got %d", len(files))
+	if len(files) != 2 {
+		t.Fatalf("expected the current image and its thumbnail on disk, got %d", len(files))
 	}
 	if err := s.DeleteStory(ctx, st.ID); err != nil {
 		t.Fatal(err)
@@ -270,8 +303,15 @@ func TestDeleteHelpers(t *testing.T) {
 	_ = s.InsertCharacter(ctx, a)
 	_ = s.InsertCharacter(ctx, b)
 	_ = s.InsertPage(ctx, &Page{StoryID: st.ID, Number: 1})
+	_, _ = s.InsertRef(ctx, st.ID, a.ID, "a.png", "", testPNG(8, 8))
 	if err := s.DeleteCharacter(ctx, a.ID); err != nil {
 		t.Fatal(err)
+	}
+	if refs, _ := s.Refs(ctx, st.ID); len(refs) != 0 {
+		t.Fatal("a deleted character takes its references with it")
+	}
+	if n, _ := s.Sweep(ctx, st.ID); n != 1 {
+		t.Fatalf("the orphaned reference image should be swept, got %d", n)
 	}
 	if err := s.DeleteCharacters(ctx, st.ID); err != nil {
 		t.Fatal(err)
@@ -430,7 +470,7 @@ func TestReferencesAndNormalize(t *testing.T) {
 	if _, err := s.Ref(ctx, r.ID); err != ErrNotFound {
 		t.Fatal("deleted ref should be gone")
 	}
-	if _, _, err := s.ImagePath(ctx, r.Image); err != ErrNotFound {
+	if _, err := s.ImageOwner(ctx, r.Image); err != ErrNotFound {
 		t.Fatal("deleting a ref should drop its image")
 	}
 	if err := s.DeleteRef(ctx, 999); err != ErrNotFound {

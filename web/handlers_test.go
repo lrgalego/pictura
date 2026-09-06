@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/lrgalego/pictura/internal/blob"
+	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/store"
 )
 
@@ -584,5 +588,56 @@ func TestAccountsMustBeEnabled(t *testing.T) {
 	resp, _ = other.get("/pending")
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
 		t.Fatal("anonymous /pending should go to login")
+	}
+}
+
+// signing wraps a blob store and hands out direct URLs, the way R2 does.
+type signing struct {
+	blob.Store
+}
+
+func (s signing) URL(ctx context.Context, name string) (string, error) {
+	return "https://bucket.example/" + name + "?X-Amz-Signature=abc", nil
+}
+
+func TestMediaRedirectsToSignedURLs(t *testing.T) {
+	dir := t.TempDir()
+	fs, _ := blob.NewFS(dir + "/images")
+	st, err := store.Open(dir, signing{fs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ai := &gated{}
+	runner := jobs.New(st, ai, 2)
+	srv := httptest.NewServer(Router(Deps{Store: st, Jobs: runner, Fake: true}))
+	t.Cleanup(srv.Close)
+	jar, _ := cookiejar.New(nil)
+	e := &env{t: t, srv: srv, runner: runner, st: st, ai: ai, client: &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
+	e.signup("signer")
+	resp, _ := e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
+	e.waitIdle()
+	e.post(base+"/characters/draw", nil, true)
+	e.waitIdle()
+	_, body := e.get(base + "/characters")
+	i := strings.Index(body, "/media/t/")
+	name := body[i+len("/media/t/") : i+len("/media/t/")+strings.Index(body[i+len("/media/t/"):], `"`)]
+	resp, _ = e.get("/media/" + name)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "https://bucket.example/"+name+"?X-Amz-Signature=abc" {
+		t.Fatalf("media should redirect to the signed url: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp, _ = e.get("/media/t/" + name)
+	if resp.StatusCode != http.StatusFound || !strings.HasSuffix(strings.Split(resp.Header.Get("Location"), "?")[0], name+".thumb.jpg") {
+		t.Fatalf("thumb should redirect to the signed thumbnail url: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=300") {
+		t.Fatalf("redirect cache hint: %s", cc)
+	}
+	// Someone else still gets nothing.
+	other := newEnvClient(t, e)
+	resp, _ = other.get("/media/" + name)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatal("media must stay owner-only")
 	}
 }
