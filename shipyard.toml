@@ -58,4 +58,4 @@ provider = "op"
 # Every op:// address in the tpl files lives in this vault; the service
 # account below is granted exactly this vault, so deploys never prompt.
 vault    = "pictura"
-service_account = "op://pictura/service-account/credential"
+service_account = "op://pictura/service_account/credential"
