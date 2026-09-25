@@ -46,7 +46,7 @@ templ Library(cards []StoryCard) {
 				}
 			</div>
 		} else {
-			<div class="shelf">
+			<div class="shelf" data-motion-stagger="pop">
 				for _, c := range cards {
 					@storyCard(c)
 				}
@@ -257,9 +257,11 @@ templ stepItem(st *store.Story, n int, label string, current int) {
 
 // ---------- jobs ----------
 
-templ JobBar(j *store.Job) {
+// JobBar shows the story-level job: its progress while it runs, and when
+// it failed, what failed and the way to start it again from this step.
+templ JobBar(st *store.Story, j *store.Job, step int) {
 	if j.Active() {
-		<div class="panel panel--soft job" role="status">
+		<div class="panel panel--soft job" role="status" data-motion-enter="pop">
 			<div class="job__row">
 				@components.Spinner("", "")
 				if j.Queued() {
@@ -275,18 +277,40 @@ templ JobBar(j *store.Job) {
 			<span class="job__hint">This page updates itself. You can leave and come back; the work keeps going.</span>
 		</div>
 	} else if j != nil && j.Status == store.JobError {
-		<div class="job">
-			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "The last step failed"}) {
-				{ j.Error }
+		{{ title, hint := jobFailure(j) }}
+		<div class="job job--failed" data-motion-enter="pop">
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: title}) {
+				<p class="job__hint">{ hint }</p>
+				<div class="job__actions">
+					if a, ok := jobRetry(st, j, step); ok {
+						if a.Dialog {
+							@components.DialogTrigger(components.DialogTriggerProps{URL: a.URL, Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm}}) {
+								@components.IconRefreshCw()
+								{ a.Label }
+							}
+						} else {
+							@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Attrs: templ.Attributes{"hx-post": a.URL, "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
+								@components.IconRefreshCw()
+								{ a.Label }
+							}
+						}
+					}
+					<details class="job__details">
+						<summary>Details</summary>
+						<code>{ j.Error }</code>
+					</details>
+				</div>
 			}
 		</div>
 	}
 }
 
 // stepPanel is the polled region: while a job runs it refetches itself.
+// Every swap into it morphs, so only what is new gets inserted, and only
+// that animates: a finished page pops in, the rest of the grid holds still.
 templ stepPanel(pollURL string, running bool) {
 	if running {
-		<div id="step-panel" hx-get={ pollURL } hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+		<div id="step-panel" hx-get={ pollURL } hx-trigger="every 2s" hx-target="this" hx-swap="outerMorph">
 			{ children... }
 		</div>
 	} else {
@@ -313,7 +337,7 @@ type FeedbackDialogProps struct {
 
 templ FeedbackDialog(p FeedbackDialogProps) {
 	@components.Dialog(components.DialogProps{Title: p.Title, Description: p.Description}) {
-		<form class="form" hx-post={ p.Action } hx-target={ p.Target } hx-swap="outerHTML" enctype="multipart/form-data">
+		<form class="form" hx-post={ p.Action } hx-target={ p.Target } hx-swap="outerMorph" enctype="multipart/form-data">
 			@FeedbackField("", p.Placeholder, "", false)
 			if p.Files {
 				@components.FileUpload(components.FileUploadProps{ID: "references", Name: "references", Accept: "image/*", Multiple: true, Label: "Reference images (optional)", Help: p.FilesHelp})
@@ -364,7 +388,7 @@ templ CharactersStep(v CharactersView) {
 templ CharactersPanel(v CharactersView) {
 	@stepPanel(base(v.Story)+"/characters/panel", v.Working) {
 		if v.Job != nil {
-			@JobBar(v.Job)
+			@JobBar(v.Story, v.Job, store.StepCharacters)
 		}
 		if len(v.Characters) == 0 && v.Job.Active() {
 			@skeletonCast()
@@ -400,7 +424,7 @@ templ castToolbar(v CharactersView, bottom bool) {
 			Adjust the cast
 		}
 		if v.AllReady {
-			<form hx-post={ base(v.Story) + "/characters/approve" } hx-target="#step-panel" hx-swap="outerHTML">
+			<form hx-post={ base(v.Story) + "/characters/approve" } hx-target="#step-panel" hx-swap="outerMorph">
 				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
 					if v.PageCount > 0 {
 						Storyboard again
@@ -411,7 +435,7 @@ templ castToolbar(v CharactersView, bottom bool) {
 				}
 			</form>
 		} else {
-			@components.Button(components.ButtonProps{Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/characters/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+			@components.Button(components.ButtonProps{Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/characters/draw", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 				@components.IconPalette()
 				if readySheets(v.Characters) > 0 {
 					Draw the remaining sheets
@@ -448,7 +472,7 @@ templ CastLibrary(groups []CastGroup) {
 				}
 			</div>
 		} else {
-			<div class="castlib">
+			<div class="castlib" data-motion-stagger="pop">
 				for _, g := range groups {
 					<article class="panel castlib__card">
 						<div class="castlib__art">
@@ -498,19 +522,19 @@ templ PagesStep(v PagesView) {
 templ PagesPanel(v PagesView) {
 	@stepPanel(base(v.Story)+"/pages/panel", v.Job.Active()) {
 		if v.Job != nil {
-			@JobBar(v.Job)
+			@JobBar(v.Story, v.Job, store.StepPages)
 		}
 		if len(v.Pages) == 0 && !v.Job.Active() {
 			<div class="empty-wrap">
 				@components.EmptyState(components.EmptyStateProps{Title: "No pages yet", Description: "The storyboard has not been made. Start it from the cast."}) {
-					@components.Button(components.ButtonProps{Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+					@components.Button(components.ButtonProps{Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 						Storyboard the pages
 					}
 				}
 			</div>
 		} else if len(v.Pages) > 0 {
 			@pagesToolbar(v, false)
-			<div class="pages">
+			<div class="pages" data-motion-stagger="rise">
 				for _, p := range v.Pages {
 					@pageCard(v.Story, p, v.Job.Active())
 				}
@@ -526,7 +550,7 @@ templ pagesToolbar(v PagesView, bottom bool) {
 			<span class="note">{ plural(len(v.Pages), "page", "pages") + ", " + plural(panelCount(v.Pages), "panel", "panels") + ". Read the plan, ask for changes, then draw." }</span>
 		}
 		<span class="toolbar__spacer"></span>
-		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 			@components.IconRefreshCw()
 			Start over
 		}
@@ -534,7 +558,7 @@ templ pagesToolbar(v PagesView, bottom bool) {
 			@components.IconPencil()
 			Adjust all pages
 		}
-		<form hx-post={ base(v.Story) + "/pages/approve" } hx-target="#step-panel" hx-swap="outerHTML">
+		<form hx-post={ base(v.Story) + "/pages/approve" } hx-target="#step-panel" hx-swap="outerMorph">
 			@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
 				if readyCount(v.Pages) > 0 {
 					Draw the changed pages
@@ -617,7 +641,7 @@ templ BookStep(v PagesView) {
 templ BookPanel(v PagesView) {
 	@stepPanel(base(v.Story)+"/book/panel", v.Job.Active()) {
 		if v.Job != nil {
-			@JobBar(v.Job)
+			@JobBar(v.Story, v.Job, store.StepBook)
 		}
 		@bookToolbar(v)
 		if len(v.Pages) == 0 {
@@ -629,7 +653,7 @@ templ BookPanel(v PagesView) {
 				}
 			</div>
 		} else {
-			<div class="book-grid">
+			<div class="book-grid" data-motion-stagger="pop">
 				for _, p := range v.Pages {
 					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Active())
 				}
@@ -650,7 +674,7 @@ templ bookToolbar(v PagesView) {
 		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
 		<span class="toolbar__spacer"></span>
 		if readyCount(v.Pages) < len(v.Pages) && !v.Job.Active() {
-			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": base(v.Story) + "/book/draw", "hx-target": "#step-panel", "hx-swap": "outerHTML"}}) {
+			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": base(v.Story) + "/book/draw", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 				@components.IconRefreshCw()
 				Draw the missing pages
 			}
@@ -670,13 +694,16 @@ templ bookToolbar(v PagesView) {
 	</div>
 }
 
+// leaf is one drawn page. The art's id is the image name, so the morph
+// that delivers a redrawn page inserts it fresh and it pops in, rather
+// than quietly swapping the src of the old one.
 templ leaf(st *store.Story, p *store.Page, idx int, busy bool) {
 	<article class="panel leaf" id={ fmt.Sprintf("leaf-%d", p.ID) }>
 		<div class="leaf__art">
 			switch p.ImageStatus {
 				case store.ImageReady:
-					<button type="button" class="char__sheet-btn" hx-get={ fmt.Sprintf("%s/book/view?img=%d", base(st), idx) } hx-target="#modal-root" aria-label={ fmt.Sprintf("Open page %d", p.Number) }>
-						<img src={ "/media/t/" + p.Image } alt={ fmt.Sprintf("Page %d: %s", p.Number, p.Title) } loading="lazy"/>
+					<button type="button" class="char__sheet-btn" id={ "art-" + p.Image } hx-get={ fmt.Sprintf("%s/book/view?img=%d", base(st), idx) } hx-target="#modal-root" aria-label={ fmt.Sprintf("Open page %d", p.Number) }>
+						<img src={ "/media/t/" + p.Image } alt={ fmt.Sprintf("Page %d: %s", p.Number, p.Title) } loading="lazy" data-motion-enter="pop"/>
 					</button>
 				case store.ImageGenerating:
 					<div class="char__state char__state--busy">
@@ -743,16 +770,16 @@ templ refStrip(st *store.Story, refs []*store.Ref, busy bool, fragment bool) {
 // refStripTarget renders reference thumbnails whose remove control swaps
 // the given target (the roster panel or a character page).
 templ refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string) {
-	<div class="refs">
+	<div class="refs" data-motion-swap="pop">
 		for _, r := range refs {
-			<div class="ref" id={ fmt.Sprintf("ref-%d", r.ID) }>
+			<div class="ref" id={ fmt.Sprintf("ref-%d", r.ID) } data-motion-exit="sink">
 				<a href={ "/media/" + r.Image } target="_blank" rel="noopener" class="ref__link">
 					<img class="ref__img" src={ "/media/t/" + r.Image } alt={ r.Filename } loading="lazy" title={ r.Note }/>
 				</a>
 				if r.Note != "" {
 					<span class="ref__note" title={ r.Note }>{ r.Note }</span>
 				}
-				<button type="button" class="ref__remove" aria-label={ "Remove " + r.Filename } hx-post={ fmt.Sprintf("%s/refs/%d/delete", base(st), r.ID) } hx-target={ target } hx-swap="outerHTML" disabled?={ busy }>
+				<button type="button" class="ref__remove" aria-label={ "Remove " + r.Filename } hx-post={ fmt.Sprintf("%s/refs/%d/delete", base(st), r.ID) } hx-target={ target } hx-swap="outerMorph" disabled?={ busy }>
 					@components.IconX()
 				</button>
 			</div>

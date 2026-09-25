@@ -110,7 +110,7 @@ h1, h2, h3, .display {
 .brand__mark { width: 2rem; height: 2rem; flex: none; }
 .brand span { white-space: nowrap; }
 .brand:hover .brand__mark { transform: rotate(-6deg); }
-.brand__mark { transition: transform 150ms ease; }
+.brand__mark { transition: transform var(--motion-fast) var(--ease-spring); }
 .topbar__nav { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
 .topbar__user { display: inline-flex; align-items: center; gap: 0.5rem; }
 .mode-pill {
@@ -173,11 +173,13 @@ h1, h2, h3, .display {
   position: absolute; padding: 1rem; width: 15rem; min-height: 11rem;
   display: flex; flex-direction: column; justify-content: space-between;
   font-family: var(--font-display); font-weight: 700;
-  animation: stamp 500ms cubic-bezier(.2,.9,.3,1.3) both;
+  animation: stamp var(--motion-slow) var(--ease-spring) both;
 }
-.strip__panel:nth-child(1) { left: 0; top: 0; transform: rotate(-4deg); animation-delay: 80ms; }
-.strip__panel:nth-child(2) { left: 13rem; top: 3.5rem; transform: rotate(2deg); animation-delay: 260ms; z-index: 1; }
-.strip__panel:nth-child(3) { left: 3rem; top: 12.5rem; width: 12rem; min-height: 9rem; transform: rotate(-1deg); animation-delay: 440ms; z-index: 2; }
+/* Stamped down one after another, a beat apart: the rhythm is the
+   profile's stagger, slowed down so each panel lands on its own. */
+.strip__panel:nth-child(1) { left: 0; top: 0; transform: rotate(-4deg); animation-delay: calc(var(--motion-stagger) * 1.5); }
+.strip__panel:nth-child(2) { left: 13rem; top: 3.5rem; transform: rotate(2deg); animation-delay: calc(var(--motion-stagger) * 4.5); z-index: 1; }
+.strip__panel:nth-child(3) { left: 3rem; top: 12.5rem; width: 12rem; min-height: 9rem; transform: rotate(-1deg); animation-delay: calc(var(--motion-stagger) * 7.5); z-index: 2; }
 .strip__panel:nth-child(2) .bubble { align-self: flex-end; margin-top: 0.5rem; }
 .strip__label { font-size: var(--text-xs); letter-spacing: 0.04em; opacity: 0.8; }
 .strip__script { font-family: var(--font-mono); font-size: 0.8rem; white-space: pre-line; line-height: 1.35; }
@@ -186,8 +188,10 @@ h1, h2, h3, .display {
 .strip__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; flex: 1; margin-top: 0.5rem; }
 .strip__cell { border: 2.5px solid #221b3a; background: #fff; border-radius: 3px; min-height: 2.2rem; }
 .strip__cell:nth-child(3) { grid-column: span 2; }
+/* A stamp lands from well above the profile's pop scale (0.6 in Playful),
+   and not at all when the profile or reduced motion says scale 1. */
 @keyframes stamp {
-  from { opacity: 0; scale: 0.6; }
+  from { opacity: 0; scale: calc(1 - (1 - var(--motion-scale)) * 3.3); }
   to { opacity: 1; scale: 1; }
 }
 
@@ -212,7 +216,7 @@ h1, h2, h3, .display {
 .style-tile {
   display: flex; gap: 0.85rem; align-items: flex-start; padding: 1rem; cursor: pointer;
   background: var(--card); border: 2.5px solid var(--border); border-radius: var(--radius-lg);
-  transition: border-color 120ms, transform 120ms, box-shadow 120ms;
+  transition: border-color var(--motion-instant) var(--ease-standard), transform var(--motion-instant) var(--ease-standard), box-shadow var(--motion-instant) var(--ease-standard);
 }
 .style-tile:hover { border-color: var(--ink); }
 .style-tile:has(input:checked) { border-color: var(--ink); box-shadow: 4px 4px 0 var(--ink); transform: translate(-1px, -1px); background: var(--accent); }
@@ -259,7 +263,7 @@ h1, h2, h3, .display {
 .shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1.5rem; padding-bottom: 3rem; }
 .book {
   display: flex; flex-direction: column; text-decoration: none; color: inherit; overflow: hidden;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  transition: transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
 }
 .book:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--ink); }
 .book:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
@@ -302,6 +306,12 @@ h1, h2, h3, .display {
 .job__title { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; }
 .job__hint { color: var(--muted-foreground); font-size: var(--text-sm); }
 .job__time { margin-left: auto; font-variant-numeric: tabular-nums; font-size: var(--text-sm); color: var(--muted-foreground); }
+.job--failed { padding: 0; }
+.job--failed .job__hint { margin: 0 0 0.6rem; color: inherit; }
+.job__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
+.job__details { font-size: var(--text-xs); color: var(--muted-foreground); min-width: 0; }
+.job__details summary { cursor: pointer; font-weight: 700; }
+.job__details code { display: block; margin-top: 0.35rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- step toolbar ---------- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; padding: 1rem 0 1.5rem; }
@@ -372,10 +382,6 @@ h1, h2, h3, .display {
 .choice-set > legend { padding: 0; margin-bottom: 0.4rem; }
 .note { font-size: var(--text-sm); color: var(--muted-foreground); }
 
-@media (prefers-reduced-motion: reduce) {
-  .strip__panel { animation: none; }
-  .book, .brand__mark, .style-tile { transition: none; }
-}
 
 /* ---------- skeleton cast while the editor reads ---------- */
 .skel { display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: 1.75rem 1.5rem; opacity: 0.7; }
@@ -403,6 +409,10 @@ h1, h2, h3, .display {
 .ref__remove:hover { background: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
 .ref__remove:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ref__remove .icon, .ref__remove svg { width: 0.9rem; height: 0.9rem; }
+/* A removed reference sinks out as soon as it is asked to go (it is not
+   the swap target, so .htmx-swapping never reaches it); the morph that
+   answers takes it out of the page, and a failure brings it back. */
+.ref:has(> .ref__remove.htmx-request) { animation: var(--motion-exit) var(--motion-fast) var(--ease-exit) both; pointer-events: none; }
 .char__refs { display: flex; flex-direction: column; gap: 0.5rem; }
 .char__refs .ref, .char__refs .ref__img { width: 5rem; height: auto; }
 .char__refs .ref__img { height: 5rem; }
@@ -413,7 +423,6 @@ h1, h2, h3, .display {
 .ref-upload__pick { cursor: pointer; }
 .ref-upload__pick:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ref-upload__pick:has(input:disabled) { opacity: 0.5; pointer-events: none; }
-.ref-upload.htmx-request .ref-upload__pick { opacity: 0.6; }
 
 /* ---------- cast registry ---------- */
 .suggest { border-bottom: 3px solid var(--ink); background: var(--secondary); color: var(--secondary-foreground); display: flex; flex-direction: column; }
@@ -445,7 +454,7 @@ h1, h2, h3, .display {
 
 /* ---------- characters step: roster ---------- */
 .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: 0.9rem; }
-.tile { display: flex; align-items: center; gap: 0.9rem; padding: 0.75rem 0.9rem; text-decoration: none; color: inherit; transition: transform 120ms, box-shadow 120ms; }
+.tile { display: flex; align-items: center; gap: 0.9rem; padding: 0.75rem 0.9rem; text-decoration: none; color: inherit; transition: transform var(--motion-instant) var(--ease-standard), box-shadow var(--motion-instant) var(--ease-standard); }
 .tile:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--ink); }
 .tile:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
 .tile--working { outline: 3px solid var(--primary); outline-offset: 2px; }
@@ -455,10 +464,9 @@ h1, h2, h3, .display {
 .tile__name { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; line-height: 1.2; }
 .tile__meta { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; font-size: var(--text-xs); color: var(--muted-foreground); }
 .tile__side { display: flex; align-items: center; gap: 0.5rem; flex: none; color: var(--muted-foreground); }
+/* Under the name, so a long story title never pushes the status out. */
+.tile__match { align-self: flex-start; display: block; max-width: 100%; margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; }
 .tile__side .badge .spinner { margin-right: 0.3rem; }
-@media (max-width: 560px) {
-  .tile__side .badge:first-child { display: none; }
-}
 
 /* ---------- character page ---------- */
 .char-page { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 1.5rem; align-items: start; padding-bottom: 3rem; }
@@ -473,7 +481,7 @@ h1, h2, h3, .display {
 .rail__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
 .rail__dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; background: var(--border); }
 .rail__dot--ready { background: var(--success); }
-.rail__dot--busy { background: var(--primary); animation: pulse 1.2s ease-in-out infinite; }
+.rail__dot--busy { background: var(--primary); animation: pulse 1.2s var(--ease-standard) infinite; }
 .rail__dot--failed { background: var(--destructive); }
 @keyframes pulse { 50% { opacity: 0.3; } }
 .char-main { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }

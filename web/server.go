@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+	htmxds "github.com/lrgalego/htmx-ds"
 	"github.com/lrgalego/htmx-ds/assets"
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
@@ -82,6 +83,7 @@ func Router(d Deps) http.Handler {
 	mux.Handle("GET /stories/{id}/characters/adjust", auth(s.castAdjustDialog))
 	mux.Handle("POST /stories/{id}/characters/adjust", auth(s.castAdjust))
 	mux.Handle("POST /stories/{id}/characters/approve", auth(s.castApprove))
+	mux.Handle("POST /stories/{id}/characters/read", auth(s.charactersRead))
 	mux.Handle("GET /stories/{id}/characters/{cid}", auth(s.characterPage))
 	mux.Handle("GET /stories/{id}/characters/{cid}/panel", auth(s.characterPanel))
 	mux.Handle("GET /stories/{id}/characters/{cid}/adjust", auth(s.characterAdjustPanel))
@@ -219,13 +221,24 @@ func (s *server) story(w http.ResponseWriter, r *http.Request) (*store.Story, bo
 	return st, true
 }
 
+// notFound and fail answer a page with a page, and an htmx request with a
+// message: ds.js never swaps an error into the target, it shows the
+// message as an error toast instead (with Try again for the 500).
 func (s *server) notFound(w http.ResponseWriter, r *http.Request) {
+	if layout.IsFragment(r) {
+		htmxds.ErrorWith(w, http.StatusNotFound, htmxds.Failure{Title: "Not found", Message: "It isn't there any more. It may have been deleted in another tab."})
+		return
+	}
 	w.WriteHeader(http.StatusNotFound)
 	_ = views.Shell(s.shell(r, "Not found"), views.NotFound()).Render(r.Context(), w)
 }
 
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+	if layout.IsFragment(r) {
+		htmxds.ErrorWith(w, http.StatusInternalServerError, htmxds.Failure{Title: "Something broke", Message: "Pictura hit an error on its side. Try again in a moment."})
+		return
+	}
 	w.WriteHeader(http.StatusInternalServerError)
 	_ = views.Shell(s.shell(r, "Something broke"), views.ServerError(err.Error())).Render(r.Context(), w)
 }

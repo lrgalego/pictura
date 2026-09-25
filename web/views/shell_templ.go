@@ -11,6 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
+	"github.com/lrgalego/htmx-ds/motion"
 
 	"github.com/lrgalego/pictura/internal/store"
 )
@@ -27,6 +28,8 @@ type ShellProps struct {
 }
 
 // Shell renders the full document: brand head, top bar, content, footer.
+// Pictura moves with the Playful profile: springs that overshoot, cards
+// that pop in and cascade.
 func Shell(p ShellProps, content templ.Component) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -49,6 +52,7 @@ func Shell(p ShellProps, content templ.Component) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = layout.Base(layout.BaseProps{
+			Motion:  motion.Playful,
 			Title:   p.Title,
 			Brand:   "Pictura",
 			CSS:     p.CSS,
@@ -90,7 +94,7 @@ func head(p ShellProps) templ.Component {
 		var templ_7745c5c3_Var3 templ.SafeURL
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(p.Favicon)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 36, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 40, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -133,7 +137,7 @@ func body(p ShellProps, content templ.Component) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<main class=\"site__main\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<main class=\"site__main\" data-motion-page>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -376,7 +380,7 @@ func Topbar(p ShellProps) templ.Component {
 					var templ_7745c5c3_Var13 string
 					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(p.User.DisplayName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 91, Col: 27}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 95, Col: 27}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 					if templ_7745c5c3_Err != nil {
@@ -732,7 +736,7 @@ func ServerError(msg string) templ.Component {
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 154, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 158, Col: 23}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
@@ -801,7 +805,7 @@ func Pending(u *store.User) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs("Your account is created, " + u.DisplayName + ". It needs to be enabled before you can start a story; you'll be able to log in and go straight to work once it is.")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 170, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 174, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -814,7 +818,7 @@ func Pending(u *store.User) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(u.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 171, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/shell.templ`, Line: 175, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {

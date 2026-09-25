@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,6 +61,12 @@ func TestNotFoundAndErrors(t *testing.T) {
 		}
 	}
 	_ = pid
+	// An htmx request for something that is gone gets a message, not a page:
+	// ds.js shows it as a toast instead of swapping an error into the target.
+	resp, body := e.post(base+"/characters/999/redraw", nil, true)
+	if resp.StatusCode != http.StatusNotFound || !strings.Contains(resp.Header.Get("HX-Trigger"), `"ds:error"`) || strings.Contains(body, "<html") {
+		t.Fatalf("htmx 404: %d %q %s", resp.StatusCode, resp.Header.Get("HX-Trigger"), body)
+	}
 	// Unauthenticated htmx requests get an HX-Redirect instead of HTML.
 	other := &env{t: t, srv: e.srv, runner: e.runner, client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
 	req, _ := http.NewRequest("GET", e.srv.URL+"/stories", nil)
@@ -80,7 +87,7 @@ func TestNotFoundAndErrors(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != base+"/book" {
 		t.Fatalf("story redirect: %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
-	resp, body := e.get("/")
+	resp, body = e.get("/")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Your stories") {
 		t.Fatal("home for a logged-in user")
 	}
@@ -749,5 +756,78 @@ func allRefIDs(body string) []string {
 		}
 		rest = rest[i+len(`id="ref-`):]
 		out = append(out, rest[:strings.Index(rest, `"`)])
+	}
+}
+
+// failJob records a failed story-level job of the given kind, the way the
+// runner does when a model call errors out.
+func (e *env) failJob(base, kind, msg string) {
+	e.t.Helper()
+	id, _ := strconv.ParseInt(strings.TrimPrefix(base, "/stories/"), 10, 64)
+	j, err := e.st.CreateJob(context.Background(), id, 0, kind, "Working…", 0)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.st.FinishJob(context.Background(), j.ID, msg); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func TestFailedJobsSayWhatFailedAndHowToRetry(t *testing.T) {
+	e := newEnv(t)
+	e.signup("unlucky")
+	base, _ := e.finished(t)
+	cases := []struct {
+		kind, msg, page string
+		want            []string
+	}{
+		{"analyze", "meta api /v1/chat/completions: HTTP 500: upstream", "/characters",
+			[]string{"Reading the script failed", "hiccup on their side", "Read the script again", base + "/characters/read", "HTTP 500: upstream"}},
+		{"sheets", "interrupted by a server restart", "/characters",
+			[]string{"Drawing the character sheets failed", "Pictura restarted", "Draw the sheets again", base + "/characters/draw"}},
+		{"cast", "fake ai: boom", "/characters",
+			[]string{"Revising the cast failed", "Adjust the cast again", base + "/characters/adjust"}},
+		{"breakdown", "context deadline exceeded", "/pages",
+			[]string{"Storyboarding failed", "Storyboard again", base + "/pages/restart"}},
+		{"pages", "boom", "/pages",
+			[]string{"Revising the pages failed", "Something went wrong on our side", "Adjust the pages again"}},
+		{"page", "boom", "/pages", []string{"Revising the page failed"}},
+		{"render", "boom", "/book", []string{"Drawing the pages failed", base + "/book/draw"}},
+		{"render-page", "boom", "/book", []string{"Redrawing the page failed", "Draw the missing pages"}},
+		{"mystery", "boom", "/book", []string{"The last step failed"}},
+	}
+	for _, c := range cases {
+		e.failJob(base, c.kind, c.msg)
+		_, body := e.get(base + c.page)
+		for _, w := range c.want {
+			if !strings.Contains(body, w) {
+				t.Fatalf("%s failure on %s should show %q", c.kind, c.page, w)
+			}
+		}
+	}
+	// A failure from another step says what failed but offers no button
+	// that would answer with this step's panel.
+	e.failJob(base, "render", "boom")
+	if _, body := e.get(base + "/characters"); !strings.Contains(body, "Drawing the pages failed") || strings.Contains(body, base+"/book/draw") {
+		t.Fatal("a book failure on the cast step should not offer the book's retry")
+	}
+	// Reading the script again starts over from the cast.
+	e.failJob(base, "analyze", "boom")
+	resp, body := e.post(base+"/characters/read", nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Reading the script again") {
+		t.Fatalf("read again: %d", resp.StatusCode)
+	}
+	e.waitIdle()
+	if _, body = e.get(base + "/characters"); strings.Contains(body, "failed") || !strings.Contains(body, "Mara") {
+		t.Fatal("the cast should be read again, with no failure left")
+	}
+	// While a job runs, another read is queued behind it rather than refused.
+	e.hold()
+	e.post(base+"/characters/draw", nil, true)
+	resp, body = e.post(base+"/characters/read", nil, true)
+	e.release()
+	e.waitIdle()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Reading the script again") {
+		t.Fatalf("read while busy: %d", resp.StatusCode)
 	}
 }

@@ -125,3 +125,63 @@ func readySheets(chars []*store.Character) int {
 	}
 	return n
 }
+
+// jobFailure words a failed story-level job for the writer: what failed,
+// in the terms of the step, and what it means. The model's own error stays
+// available under "Details".
+func jobFailure(j *store.Job) (title, hint string) {
+	switch j.Kind {
+	case "analyze":
+		title = "Reading the script failed"
+	case "cast":
+		title = "Revising the cast failed"
+	case "sheets":
+		title = "Drawing the character sheets failed"
+	case "breakdown":
+		title = "Storyboarding failed"
+	case "pages":
+		title = "Revising the pages failed"
+	case "page":
+		title = "Revising the page failed"
+	case "render":
+		title = "Drawing the pages failed"
+	case "render-page":
+		title = "Redrawing the page failed"
+	default:
+		title = "The last step failed"
+	}
+	switch e := strings.ToLower(j.Error); {
+	case strings.Contains(e, "server restart"):
+		hint = "Pictura restarted while this was running. Nothing is lost; start it again."
+	case strings.Contains(e, "meta api"), strings.Contains(e, "fake ai"), strings.Contains(e, "deadline"), strings.Contains(e, "timeout"):
+		hint = "The writing and drawing models didn't answer properly. That's usually a hiccup on their side; try again in a moment."
+	default:
+		hint = "Something went wrong on our side. Try again; if it keeps failing, change the request a little."
+	}
+	return title, hint
+}
+
+// retryAction starts a failed job again from the step that shows it. A
+// revision needs the notes again, so it reopens the adjust dialog.
+type retryAction struct {
+	URL, Label string
+	Dialog     bool
+}
+
+func jobRetry(st *store.Story, j *store.Job, step int) (retryAction, bool) {
+	switch {
+	case step == store.StepCharacters && j.Kind == "analyze":
+		return retryAction{URL: base(st) + "/characters/read", Label: "Read the script again"}, true
+	case step == store.StepCharacters && j.Kind == "sheets":
+		return retryAction{URL: base(st) + "/characters/draw", Label: "Draw the sheets again"}, true
+	case step == store.StepCharacters && j.Kind == "cast":
+		return retryAction{URL: base(st) + "/characters/adjust", Label: "Adjust the cast again", Dialog: true}, true
+	case step == store.StepPages && j.Kind == "breakdown":
+		return retryAction{URL: base(st) + "/pages/restart", Label: "Storyboard again"}, true
+	case step == store.StepPages && j.Kind == "pages":
+		return retryAction{URL: base(st) + "/pages/adjust", Label: "Adjust the pages again", Dialog: true}, true
+	case step == store.StepBook && (j.Kind == "render" || j.Kind == "render-page"):
+		return retryAction{URL: base(st) + "/book/draw", Label: "Draw the missing pages"}, true
+	}
+	return retryAction{}, false
+}

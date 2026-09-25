@@ -523,7 +523,7 @@ func TestCastRegistry(t *testing.T) {
 	b := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	_, body = e.get(b + "/characters")
-	if strings.Count(body, "Match in Book One") != 3 {
+	if strings.Count(body, ">Match in Book One<") != 3 {
 		t.Fatalf("expected a match hint on every tile:\n%s", body)
 	}
 	maraB := firstCharacterID(body)
@@ -551,7 +551,7 @@ func TestCastRegistry(t *testing.T) {
 		t.Fatalf("linked character should carry the copied sheet and lineage, and no suggestion:\n%s", body)
 	}
 	_, body = e.get(b + "/characters")
-	if strings.Count(body, `class="tile__avatar" src=`) != 1 || strings.Count(body, "Match in Book One") != 2 || !strings.Contains(body, "also in Book One") {
+	if strings.Count(body, `class="tile__avatar" src=`) != 1 || strings.Count(body, ">Match in Book One<") != 2 || !strings.Contains(body, "also in Book One") {
 		t.Fatal("roster should show one sheet, one lineage, two remaining hints")
 	}
 	if !strings.Contains(body, "Draw the remaining sheets") {

@@ -3,6 +3,7 @@ package views
 import (
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
+	"github.com/lrgalego/htmx-ds/motion"
 
 	"github.com/lrgalego/pictura/internal/store"
 )
@@ -19,8 +20,11 @@ type ShellProps struct {
 }
 
 // Shell renders the full document: brand head, top bar, content, footer.
+// Pictura moves with the Playful profile: springs that overshoot, cards
+// that pop in and cascade.
 templ Shell(p ShellProps, content templ.Component) {
 	@layout.Base(layout.BaseProps{
+		Motion:  motion.Playful,
 		Title:   p.Title,
 		Brand:   "Pictura",
 		CSS:     p.CSS,
@@ -41,7 +45,7 @@ templ head(p ShellProps) {
 templ body(p ShellProps, content templ.Component) {
 	<div class="site">
 		@Topbar(p)
-		<main class="site__main">
+		<main class="site__main" data-motion-page>
 			@content
 		</main>
 		@footer()

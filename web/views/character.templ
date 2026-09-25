@@ -80,7 +80,7 @@ func sheetStatus(c *store.Character, job *store.Job) (label string, tone compone
 // ---------- the roster (characters step) ----------
 
 templ roster(v CharactersView) {
-	<div class="roster">
+	<div class="roster" data-motion-stagger="pop">
 		for _, c := range v.Characters {
 			@tile(v, c)
 		}
@@ -103,13 +103,14 @@ templ tile(v CharactersView, c *store.Character) {
 					<span>{ "also in " + titleOr(v.Lineage[c.ID][0]) }</span>
 				}
 			</div>
-		</div>
-		<div class="tile__side">
 			if len(v.Suggestions[c.ID]) > 0 {
-				@components.Badge(components.BadgeSecondary, nil) {
-					{ "Match in " + titleOr(v.Suggestions[c.ID][0].Story) }
+				{{ match := "Match in " + titleOr(v.Suggestions[c.ID][0].Story) }}
+				@components.Badge(components.BadgeSecondary, templ.Attributes{"class": "tile__match", "title": match}) {
+					{ match }
 				}
 			}
+		</div>
+		<div class="tile__side">
 			@statusBadge(c, v.CharJobs[c.ID])
 			@components.IconChevronRight()
 		</div>
@@ -130,7 +131,7 @@ templ statusBadge(c *store.Character, job *store.Job) {
 // thumbnail when drawn, an initial otherwise.
 templ avatar(c *store.Character, class string) {
 	if c.SheetStatus == store.ImageReady && c.SheetImage != "" {
-		<img class={ class } src={ "/media/t/" + c.SheetImage } alt=""/>
+		<img class={ class } src={ "/media/t/" + c.SheetImage } alt="" data-motion-enter="pop"/>
 	} else {
 		<span class={ class + " avatar--blank" }>{ initials(c.Name) }</span>
 	}
@@ -181,7 +182,7 @@ func dotClass(label string) string {
 // CharacterPanel is the polled main region of the character page.
 templ CharacterPanel(v CharacterView) {
 	if v.Working {
-		<div id="char-panel" class="char-main" hx-get={ charURL(v.Story, v.Character) + "/panel" } hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+		<div id="char-panel" class="char-main" hx-get={ charURL(v.Story, v.Character) + "/panel" } hx-trigger="every 2s" hx-target="this" hx-swap="outerMorph">
 			@characterMain(v)
 		</div>
 	} else {
@@ -239,7 +240,7 @@ templ characterMain(v CharacterView) {
 		</div>
 	</header>
 	if v.StoryJob.Active() {
-		@JobBar(v.StoryJob)
+		@JobBar(v.Story, v.StoryJob, 0)
 	}
 	if job != nil && job.Status == store.JobError {
 		@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "The last change to " + c.Name + " failed"}) {
@@ -264,8 +265,8 @@ templ characterMain(v CharacterView) {
 					</div>
 				</div>
 			} else if c.SheetStatus == store.ImageReady {
-				<button type="button" class="char__sheet-btn" hx-get={ charURL(v.Story, c) + "/view" } hx-target="#modal-root" aria-label={ "Open " + c.Name + "'s sheet" }>
-					<img src={ "/media/t/" + c.SheetImage } alt={ c.Name + " character sheet" }/>
+				<button type="button" class="char__sheet-btn" id={ "sheet-" + c.SheetImage } hx-get={ charURL(v.Story, c) + "/view" } hx-target="#modal-root" aria-label={ "Open " + c.Name + "'s sheet" }>
+					<img src={ "/media/t/" + c.SheetImage } alt={ c.Name + " character sheet" } data-motion-enter="pop"/>
 				</button>
 			} else if c.SheetStatus == store.ImageError {
 				<div class="char__state sheet-hero__state">
@@ -291,17 +292,17 @@ templ characterMain(v CharacterView) {
 			}
 			<div class="sheet-hero__actions">
 				if c.SheetStatus == store.ImageReady {
-					@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerHTML"}}) {
+					@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerMorph"}}) {
 						@components.IconRefreshCw()
 						Redraw
 					}
 				} else {
-					@components.Button(components.ButtonProps{Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerHTML"}}) {
+					@components.Button(components.ButtonProps{Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-post": charURL(v.Story, c) + "/redraw", "hx-target": "#char-panel", "hx-swap": "outerMorph"}}) {
 						@components.IconPalette()
 						Draw the sheet
 					}
 				}
-				<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/sheet" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+				<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/sheet" } hx-target="#char-panel" hx-swap="outerMorph" enctype="multipart/form-data">
 					<label class="ref-upload__pick btn btn--ghost btn--sm">
 						@components.IconDownload()
 						if c.SheetStatus == store.ImageReady {
@@ -331,7 +332,7 @@ templ characterMain(v CharacterView) {
 			@refStripTarget(v.Story, v.Refs, v.busy(), "#char-panel")
 		}
 		if len(v.Refs) < MaxRefs {
-			<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/refs" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+			<form class="ref-upload" hx-post={ charURL(v.Story, c) + "/refs" } hx-target="#char-panel" hx-swap="outerMorph" enctype="multipart/form-data">
 				<label class="ref-upload__pick btn btn--outline btn--sm">
 					@components.IconPlus()
 					Add images
@@ -381,7 +382,7 @@ templ characterDetails(v CharacterView) {
 
 // CharacterEditForm replaces the description block in place.
 templ CharacterEditForm(st *store.Story, c *store.Character, err string) {
-	<form class="form details__form" hx-post={ charURL(st, c) + "/edit" } hx-target="#char-panel" hx-swap="outerHTML">
+	<form class="form details__form" hx-post={ charURL(st, c) + "/edit" } hx-target="#char-panel" hx-swap="outerMorph">
 		<div class="details__head">
 			<h2>Edit description</h2>
 		</div>
@@ -431,7 +432,7 @@ templ CharacterEditForm(st *store.Story, c *store.Character, err string) {
 }
 
 templ matchBox(v CharacterView) {
-	<div class="panel panel--pop suggest suggest--page">
+	<div class="panel panel--pop suggest suggest--page" data-motion-enter="pop">
 		for _, m := range v.Matches {
 			<div class="suggest__row">
 				if m.Character.SheetStatus == store.ImageReady {
@@ -449,7 +450,7 @@ templ matchBox(v CharacterView) {
 						}
 					</span>
 				</div>
-				<form hx-post={ charURL(v.Story, v.Character) + "/link" } hx-target="#char-panel" hx-swap="outerHTML">
+				<form hx-post={ charURL(v.Story, v.Character) + "/link" } hx-target="#char-panel" hx-swap="outerMorph">
 					<input type="hidden" name="source" value={ strconv.FormatInt(m.Character.ID, 10) }/>
 					@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm}) {
 						Yes, use this one
@@ -467,7 +468,7 @@ templ AdjustPanel(v CharacterView) {
 	{{ c := v.Character }}
 	{{ room := MaxRefs - len(v.Refs) }}
 	@components.SidePanel(components.SidePanelProps{Title: "Adjust " + c.Name, Description: "Say what should change in plain words. The editor revises the description" + adjustTail(c) + "."}) {
-		<form class="form" hx-post={ charURL(v.Story, c) + "/adjust" } hx-target="#char-panel" hx-swap="outerHTML" enctype="multipart/form-data">
+		<form class="form" hx-post={ charURL(v.Story, c) + "/adjust" } hx-target="#char-panel" hx-swap="outerMorph" enctype="multipart/form-data">
 			@FeedbackField("", "e.g. Shorter hair, a leather jacket instead of the coat, and she should look more tired.", "", false)
 			if room > 0 {
 				@components.FileUpload(components.FileUploadProps{ID: "references", Name: "references", Accept: "image/*", Multiple: true, Label: "Reference images (optional)", Help: fmt.Sprintf("Photos, sketches, outfits or props to match. Up to %d more, 5 MB each.", room)})
@@ -512,7 +513,7 @@ templ LinkPanel(v CharacterView, entries []store.LibraryEntry) {
 							<b>{ e.Character.Name }</b>
 							<span class="note">{ e.Character.Role + " in " + titleOr(e.Story) }</span>
 						</div>
-						<form hx-post={ charURL(v.Story, c) + "/link" } hx-target="#char-panel" hx-swap="outerHTML">
+						<form hx-post={ charURL(v.Story, c) + "/link" } hx-target="#char-panel" hx-swap="outerMorph">
 							<input type="hidden" name="source" value={ strconv.FormatInt(e.Character.ID, 10) }/>
 							@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm, Variant: components.ButtonOutline}) {
 								Use

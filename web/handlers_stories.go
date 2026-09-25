@@ -726,6 +726,20 @@ func titleOr(st *store.Story) string {
 	return st.Title
 }
 
+// charactersRead reads the script again: the way forward when reading it
+// failed.
+func (s *server) charactersRead(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	if err := s.jobs.Analyze(st.ID); err != nil {
+		s.answerCharacters(w, r, st, errorToast(err))
+		return
+	}
+	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Reading the script again", "The editor is on it."))
+}
+
 // charactersDraw starts the sheets: the end of the casting phase.
 func (s *server) charactersDraw(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
