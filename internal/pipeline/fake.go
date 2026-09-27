@@ -154,6 +154,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 			}
 		}
 		v = map[string]any{"pages": pages}
+	case "voices":
+		v = fakeCasting(user)
 	case "page":
 		pages := breakdown(script, cast(script))
 		p := pages[0]
@@ -166,6 +168,33 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 	}
 	b, _ := json.Marshal(v)
 	return json.Unmarshal(b, out)
+}
+
+// fakeCasting deals catalog voices in order to the characters listed under
+// "CAST THESE CHARACTERS:", skipping voices already taken and the narrator.
+func fakeCasting(user string) map[string]any {
+	taken := map[string]bool{DefaultNarrator: true}
+	for _, v := range Voices {
+		if strings.Contains(after(user, "ALREADY CAST"), "("+v.ID+")") {
+			taken[v.ID] = true
+		}
+	}
+	var free []string
+	for _, v := range Voices {
+		if !taken[v.ID] {
+			free = append(free, v.ID)
+		}
+	}
+	var chars []map[string]string
+	for _, line := range strings.Split(after(user, "CAST THESE CHARACTERS:"), "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "- ")
+		name, _, ok := strings.Cut(line, " (")
+		if !ok || name == "" {
+			continue
+		}
+		chars = append(chars, map[string]string{"name": name, "voice": free[len(chars)%len(free)]})
+	}
+	return map[string]any{"narrator": DefaultNarrator, "characters": chars}
 }
 
 func after(s, marker string) string {

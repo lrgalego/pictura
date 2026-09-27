@@ -12,3 +12,8 @@
 #   op run --env-file=.env.dev.tpl -- $SHELL      # a whole session
 #
 META_API_KEY=op://pictura/meta-ai-api-dev/credential
+
+# Text to speech for read-aloud. Meta's Model API has no speech synthesis;
+# ElevenLabs (restricted key: TTS, voices read, forced alignment, models,
+# user) supplies the voices and the per-word timings.
+ELEVENLABS_API_KEY=op://pictura/elevenlabs-api-dev/credential

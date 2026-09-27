@@ -224,8 +224,64 @@ func (r *Runner) Analyze(storyID int64) error {
 				return err
 			}
 		}
+		report(0, 0, "Casting voices…")
+		r.castVoices(ctx, storyID)
 		return nil
 	})
+}
+
+// CastVoices casts voices for a story whose characters have none yet (one
+// made before voices existed, or one whose casting call failed).
+func (r *Runner) CastVoices(storyID int64) error {
+	return r.start(storyID, "voices", "Casting voices…", 0, func(ctx context.Context, report reporter) error {
+		story, err := r.st.Story(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		chars, err := r.st.Characters(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		narrator, voices, err := pipeline.CastVoices(ctx, r.ai, story, chars)
+		if err != nil {
+			return err
+		}
+		if err := r.st.SetNarratorVoice(ctx, storyID, narrator); err != nil {
+			return err
+		}
+		for id, v := range voices {
+			if err := r.st.SetCharacterVoice(ctx, id, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// castVoices gives a voice to every character that has none, and to the
+// narrator. It is best effort: when the model call fails the characters
+// keep speaking with their stable fallback voices (pipeline.CharacterVoice)
+// and the writer can still pick by hand, so the job does not fail over it.
+func (r *Runner) castVoices(ctx context.Context, storyID int64) {
+	story, err := r.st.Story(ctx, storyID)
+	if err != nil {
+		return
+	}
+	chars, err := r.st.Characters(ctx, storyID)
+	if err != nil {
+		return
+	}
+	narrator, voices, err := pipeline.CastVoices(ctx, r.ai, story, chars)
+	if err != nil {
+		log.Printf("cast voices story %d: %v", storyID, err)
+		return
+	}
+	if narrator != story.NarratorVoice {
+		_ = r.st.SetNarratorVoice(ctx, storyID, narrator)
+	}
+	for id, v := range voices {
+		_ = r.st.SetCharacterVoice(ctx, id, v)
+	}
 }
 
 // DrawSheets draws every character sheet that is not ready yet.
@@ -578,6 +634,7 @@ func (r *Runner) AdjustCast(storyID int64, feedback string) error {
 		for _, gone := range byName {
 			_ = r.st.DeleteCharacter(ctx, gone.ID)
 		}
+		r.castVoices(ctx, storyID) // newcomers need a voice
 		if !artPhase {
 			return nil
 		}

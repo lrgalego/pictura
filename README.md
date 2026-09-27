@@ -8,7 +8,7 @@ approving and adjusting each step.
 The workflow, one screen per step:
 
 1. **Script** — paste the story, pick a look (comic, manga, storybook, cartoon, noir, pixel art).
-2. **Characters** — every character gets an illustrator-ready description first. Attach reference images (photos, sketches, outfits, props) to any character, upload a finished model sheet to use as-is, or reuse a character from another story; adjust the words, then draw the remaining sheets from the references. Afterwards adjust, redraw or edit any character.
+2. **Characters** — every character gets an illustrator-ready description first, and a voice cast from their age and temperament (the narrator too); press play to hear any character say their line in any voice and pick another. Attach reference images (photos, sketches, outfits, props) to any character, upload a finished model sheet to use as-is, or reuse a character from another story; adjust the words, then draw the remaining sheets from the references. Afterwards adjust, redraw or edit any character.
 3. **Pages** — the script becomes pages of panels with shots, dialogue and captions. Adjust one page or the whole plan.
 4. **Comic** — pages are drawn with the character sheets as references so the cast stays on-model. Redraw any page with notes; download as PDF or a zip of PNGs.
 
@@ -48,6 +48,17 @@ writes once to the git-ignored `.op-token`, so nothing ever prompts. Without a k
 placeholder-art mode so the whole workflow can be exercised for free.
 
 Optional: `META_TEXT_MODEL` / `META_IMAGE_MODEL` override the model ids.
+
+Voices come from **ElevenLabs** (Meta's Model API has speech-to-text but no
+speech synthesis): `ELEVENLABS_API_KEY`, resolved in development from
+`op://pictura/elevenlabs-api-dev` by `.env.dev.tpl` (a restricted key: text
+to speech, voices read, forced alignment, models, user). The default model
+is `eleven_v3`, the most expressive; `ELEVENLABS_MODEL` overrides it.
+Without a key, or with `--fake-ai`, voices are placeholder tones, one per
+word, timed like real speech. The account is on the free plan (10k
+characters a month, no commercial use): production needs a paid plan and
+its own `elevenlabs-api` vault item before the key goes into
+`.env.production.tpl`.
 
 ## Images
 
@@ -92,7 +103,8 @@ shipyard ssh 'cd /opt/pictura && sudo docker compose run --rm --no-deps server -
 | `cmd/server` | the binary: flags, `.env` loading, provider selection |
 | `internal/store` | SQLite (modernc, pure Go): users, sessions, stories, characters, pages, jobs, images |
 | `internal/meta` | Meta Model API client: chat completions with JSON schema, image generations/edits |
-| `internal/pipeline` | prompts, schemas and the `AI` interface; `fake.go` is the offline provider |
+| `internal/elevenlabs` | ElevenLabs text to speech with per-character timestamps, grouped into words |
+| `internal/pipeline` | prompts, schemas and the `AI` interface; `fake.go` is the offline provider; `voice.go` the voice catalog, casting and the `Speaker` interface (`fakevoice.go` offline) |
 | `internal/jobs` | background runner: one job per story, concurrent image drawing, progress for the UI |
 | `internal/pdf` | minimal PDF writer (one JPEG page per comic page) |
 | `web` | routes, auth, handlers; `web/views` templ pages; `web/static/app.css` the brand theme |

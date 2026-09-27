@@ -639,3 +639,85 @@ func TestLinkAndSetSheetAreQueued(t *testing.T) {
 	_ = e.r.SetSheet(e.sto.ID, 4242, sheet)
 	e.mustFail("set sheet missing", "not found")
 }
+
+// noCasting wraps the fake and fails only the voice-casting call.
+type noCasting struct{ pipeline.AI }
+
+func (n noCasting) ChatJSON(ctx context.Context, system, user string, images []pipeline.Image, schemaName string, schema map[string]any, out any) error {
+	if schemaName == "voices" {
+		return errors.New("casting down")
+	}
+	return n.AI.ChatJSON(ctx, system, user, images, schemaName, schema, out)
+}
+
+func TestAnalyzeCastsVoices(t *testing.T) {
+	e := newEnv(t)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	if _, ok := pipeline.VoiceByID(sto.NarratorVoice); !ok {
+		t.Fatalf("narrator not cast: %q", sto.NarratorVoice)
+	}
+	seen := map[string]string{sto.NarratorVoice: "narrator"}
+	for _, c := range e.chars() {
+		if _, ok := pipeline.VoiceByID(c.Voice); !ok {
+			t.Fatalf("%s has no voice: %q", c.Name, c.Voice)
+		}
+		if who, dup := seen[c.Voice]; dup {
+			t.Fatalf("%s and %s share a voice", c.Name, who)
+		}
+		seen[c.Voice] = c.Name
+	}
+
+	// A pick by hand survives a cast revision; a newcomer gets a voice.
+	mara := e.chars()[0]
+	_ = e.st.SetCharacterVoice(e.ctx, mara.ID, "pqHfZKP75CvOlQylNhV4")
+	newcomer := &store.Character{StoryID: e.sto.ID, Name: "Innkeeper", Position: 9}
+	_ = e.st.InsertCharacter(e.ctx, newcomer)
+	_ = e.r.AdjustCast(e.sto.ID, "keep everyone")
+	e.mustDone("adjust")
+	if got, _ := e.st.Character(e.ctx, mara.ID); got.Voice != "pqHfZKP75CvOlQylNhV4" {
+		t.Fatalf("the picked voice was replaced: %q", got.Voice)
+	}
+	for _, c := range e.chars() {
+		if c.Voice == "" {
+			t.Fatalf("%s left without a voice after the cast changed", c.Name)
+		}
+	}
+}
+
+func TestCastingFailureDoesNotFailTheRead(t *testing.T) {
+	e := newEnv(t)
+	e.r = New(e.st, noCasting{&pipeline.Fake{}}, 0)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze without casting")
+	chars := e.chars()
+	if len(chars) == 0 {
+		t.Fatal("no cast")
+	}
+	for _, c := range chars {
+		if c.Voice != "" || pipeline.CharacterVoice(c).ID == "" {
+			t.Fatalf("%s: uncast characters keep the fallback voice: %+v", c.Name, c)
+		}
+	}
+}
+
+func TestCastVoicesJob(t *testing.T) {
+	e := newEnv(t)
+	e.r = New(e.st, noCasting{&pipeline.Fake{}}, 0)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	// Casting was down during the read; asking again surfaces the failure.
+	_ = e.r.CastVoices(e.sto.ID)
+	e.mustFail("cast voices", "casting down")
+	// Once the model answers, everyone and the narrator get a voice.
+	e.r = New(e.st, &pipeline.Fake{}, 0)
+	_ = e.r.CastVoices(e.sto.ID)
+	e.mustDone("cast voices")
+	if pipeline.Uncast(e.chars()) {
+		t.Fatalf("still uncast: %+v", e.chars())
+	}
+	if st, _ := e.st.Story(e.ctx, e.sto.ID); st.NarratorVoice != pipeline.DefaultNarrator {
+		t.Fatalf("narrator: %q", st.NarratorVoice)
+	}
+}

@@ -159,7 +159,13 @@ CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
 	if err := s.addColumn("users", "enabled", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.addColumn("stories", "script_html", "TEXT NOT NULL DEFAULT ''")
+	if err := s.addColumn("stories", "script_html", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.addColumn("stories", "narrator_voice", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.addColumn("characters", "voice", "TEXT NOT NULL DEFAULT ''")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -326,8 +332,12 @@ type Story struct {
 	Style      string
 	World      string
 	Step       int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// NarratorVoice is the voice id captions are read in; empty until cast.
+	// Only SetNarratorVoice writes it, so a job holding a stale copy of the
+	// story cannot undo the writer's pick.
+	NarratorVoice string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (s *Store) CreateStory(ctx context.Context, userID int64, title, script, scriptHTML, style string) (*Story, error) {
@@ -348,12 +358,12 @@ func (s *Store) Story(ctx context.Context, id int64) (*Story, error) {
 
 type scanner interface{ Scan(dest ...any) error }
 
-const storyCols = `id, user_id, title, logline, script, script_html, style, world, step, created_at, updated_at`
+const storyCols = `id, user_id, title, logline, script, script_html, style, world, step, narrator_voice, created_at, updated_at`
 
 func scanStory(row scanner) (*Story, error) {
 	var st Story
 	var c, u string
-	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &c, &u); err != nil {
+	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &st.NarratorVoice, &c, &u); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -383,6 +393,12 @@ func (s *Store) StoriesByUser(ctx context.Context, userID int64) ([]*Story, erro
 func (s *Store) UpdateStory(ctx context.Context, st *Story) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE stories SET title=?, logline=?, script=?, script_html=?, style=?, world=?, step=?, updated_at=? WHERE id=?`,
 		st.Title, st.Logline, st.Script, st.ScriptHTML, st.Style, st.World, st.Step, now(), st.ID)
+	return err
+}
+
+// SetNarratorVoice sets the voice captions are read in.
+func (s *Store) SetNarratorVoice(ctx context.Context, storyID int64, voice string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE stories SET narrator_voice = ?, updated_at = ? WHERE id = ?`, voice, now(), storyID)
 	return err
 }
 
@@ -445,6 +461,11 @@ type Character struct {
 	SheetStatus string
 	SheetError  string
 	OriginID    int64 // the character this one was copied from (0 = an original); the registry groups by Origin()
+	// Voice is the voice id the character speaks with; empty until cast.
+	// Like the narrator's, it is written only by InsertCharacter and
+	// SetCharacterVoice, never by UpdateCharacter, so a revision in flight
+	// cannot overwrite a voice picked meanwhile.
+	Voice string
 }
 
 // Origin is the lineage key: the id of the first appearance of this character.
@@ -455,11 +476,11 @@ func (c *Character) Origin() int64 {
 	return c.ID
 }
 
-const charCols = `id, story_id, position, name, role, age, visual, wardrobe, items, personality, sheet_image, sheet_status, sheet_error, COALESCE(origin_id, 0)`
+const charCols = `id, story_id, position, name, role, age, visual, wardrobe, items, personality, sheet_image, sheet_status, sheet_error, COALESCE(origin_id, 0), voice`
 
 func scanChar(row scanner) (*Character, error) {
 	var c Character
-	if err := row.Scan(&c.ID, &c.StoryID, &c.Position, &c.Name, &c.Role, &c.Age, &c.Visual, &c.Wardrobe, &c.Items, &c.Personality, &c.SheetImage, &c.SheetStatus, &c.SheetError, &c.OriginID); err != nil {
+	if err := row.Scan(&c.ID, &c.StoryID, &c.Position, &c.Name, &c.Role, &c.Age, &c.Visual, &c.Wardrobe, &c.Items, &c.Personality, &c.SheetImage, &c.SheetStatus, &c.SheetError, &c.OriginID, &c.Voice); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -490,8 +511,8 @@ func (s *Store) Character(ctx context.Context, id int64) (*Character, error) {
 }
 
 func (s *Store) InsertCharacter(ctx context.Context, c *Character) error {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO characters (story_id, position, name, role, age, visual, wardrobe, items, personality, sheet_image, sheet_status, sheet_error, origin_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.StoryID, c.Position, c.Name, c.Role, c.Age, c.Visual, c.Wardrobe, c.Items, c.Personality, c.SheetImage, orDefault(c.SheetStatus, ImagePending), c.SheetError, nullable(c.OriginID))
+	res, err := s.db.ExecContext(ctx, `INSERT INTO characters (story_id, position, name, role, age, visual, wardrobe, items, personality, sheet_image, sheet_status, sheet_error, origin_id, voice) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.StoryID, c.Position, c.Name, c.Role, c.Age, c.Visual, c.Wardrobe, c.Items, c.Personality, c.SheetImage, orDefault(c.SheetStatus, ImagePending), c.SheetError, nullable(c.OriginID), c.Voice)
 	if err != nil {
 		return err
 	}
@@ -502,6 +523,12 @@ func (s *Store) InsertCharacter(ctx context.Context, c *Character) error {
 func (s *Store) UpdateCharacter(ctx context.Context, c *Character) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE characters SET position=?, name=?, role=?, age=?, visual=?, wardrobe=?, items=?, personality=?, sheet_image=?, sheet_status=?, sheet_error=?, origin_id=? WHERE id=?`,
 		c.Position, c.Name, c.Role, c.Age, c.Visual, c.Wardrobe, c.Items, c.Personality, c.SheetImage, c.SheetStatus, c.SheetError, nullable(c.OriginID), c.ID)
+	return err
+}
+
+// SetCharacterVoice sets the voice a character speaks with.
+func (s *Store) SetCharacterVoice(ctx context.Context, id int64, voice string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE characters SET voice = ? WHERE id = ?`, voice, id)
 	return err
 }
 
@@ -1063,8 +1090,8 @@ type LibraryEntry struct {
 // Library lists every character across a user's stories, newest first.
 // The registry view groups them by Character.Origin().
 func (s *Store) Library(ctx context.Context, userID int64) ([]LibraryEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.story_id, c.position, c.name, c.role, c.age, c.visual, c.wardrobe, c.items, c.personality, c.sheet_image, c.sheet_status, c.sheet_error, COALESCE(c.origin_id, 0),
-		s.id, s.user_id, s.title, s.logline, s.script, s.script_html, s.style, s.world, s.step, s.created_at, s.updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.story_id, c.position, c.name, c.role, c.age, c.visual, c.wardrobe, c.items, c.personality, c.sheet_image, c.sheet_status, c.sheet_error, COALESCE(c.origin_id, 0), c.voice,
+		s.id, s.user_id, s.title, s.logline, s.script, s.script_html, s.style, s.world, s.step, s.narrator_voice, s.created_at, s.updated_at
 		FROM characters c JOIN stories s ON s.id = c.story_id
 		WHERE s.user_id = ? ORDER BY c.id DESC`, userID)
 	if err != nil {
@@ -1076,8 +1103,8 @@ func (s *Store) Library(ctx context.Context, userID int64) ([]LibraryEntry, erro
 		var c Character
 		var st Story
 		var created, updated string
-		if err := rows.Scan(&c.ID, &c.StoryID, &c.Position, &c.Name, &c.Role, &c.Age, &c.Visual, &c.Wardrobe, &c.Items, &c.Personality, &c.SheetImage, &c.SheetStatus, &c.SheetError, &c.OriginID,
-			&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &created, &updated); err != nil {
+		if err := rows.Scan(&c.ID, &c.StoryID, &c.Position, &c.Name, &c.Role, &c.Age, &c.Visual, &c.Wardrobe, &c.Items, &c.Personality, &c.SheetImage, &c.SheetStatus, &c.SheetError, &c.OriginID, &c.Voice,
+			&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &st.NarratorVoice, &created, &updated); err != nil {
 			return nil, err
 		}
 		st.CreatedAt, st.UpdatedAt = parseTime(created), parseTime(updated)
@@ -1087,7 +1114,7 @@ func (s *Store) Library(ctx context.Context, userID int64) ([]LibraryEntry, erro
 }
 
 // LinkCharacter makes dst the same character as src: it copies the look,
-// the references and the finished sheet (files are duplicated so deleting
+// the voice, the references and the finished sheet (files are duplicated so deleting
 // either story leaves the other whole) and records the lineage.
 func (s *Store) LinkCharacter(ctx context.Context, dst, src *Character) error {
 	dst.Age, dst.Visual, dst.Wardrobe, dst.Items, dst.Personality = src.Age, src.Visual, src.Wardrobe, src.Items, src.Personality
@@ -1105,6 +1132,12 @@ func (s *Store) LinkCharacter(ctx context.Context, dst, src *Character) error {
 	}
 	if err := s.UpdateCharacter(ctx, dst); err != nil {
 		return err
+	}
+	if src.Voice != "" {
+		if err := s.SetCharacterVoice(ctx, dst.ID, src.Voice); err != nil {
+			return err
+		}
+		dst.Voice = src.Voice
 	}
 	refs, err := s.Refs(ctx, src.StoryID)
 	if err != nil {

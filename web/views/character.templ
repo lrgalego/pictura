@@ -6,6 +6,7 @@ import (
 
 	"github.com/lrgalego/htmx-ds/components"
 
+	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 )
 
@@ -102,6 +103,7 @@ templ tile(v CharactersView, c *store.Character) {
 				if len(v.Lineage[c.ID]) > 0 {
 					<span>{ "also in " + titleOr(v.Lineage[c.ID][0]) }</span>
 				}
+				<span>{ "voice: " + pipeline.CharacterVoice(c).Name }</span>
 			</div>
 			if len(v.Suggestions[c.ID]) > 0 {
 				{{ match := "Match in " + titleOr(v.Suggestions[c.ID][0].Story) }}
@@ -360,6 +362,7 @@ templ characterMain(v CharacterView) {
 
 templ characterDetails(v CharacterView) {
 	{{ c := v.Character }}
+	@characterVoiceLine(v.Story, c)
 	<div class="details__head">
 		<h2>Description</h2>
 		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: v.busy(), Attrs: templ.Attributes{"hx-get": charURL(v.Story, c) + "/edit", "hx-target": "#char-details", "hx-swap": "innerHTML"}}) {

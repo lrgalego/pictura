@@ -1,0 +1,141 @@
+package views
+
+import (
+	"fmt"
+
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
+)
+
+// VoicePicker is the catalog beside one character, or beside the narrator
+// when Character is nil.
+type VoicePicker struct {
+	Story     *store.Story
+	Character *store.Character
+	Current   string
+	Voices    []pipeline.Voice
+}
+
+func (p VoicePicker) who() string {
+	if p.Character == nil {
+		return "the narrator"
+	}
+	return p.Character.Name
+}
+
+func (p VoicePicker) action() string {
+	if p.Character == nil {
+		return base(p.Story) + "/narrator"
+	}
+	return charURL(p.Story, p.Character) + "/voice"
+}
+
+func (p VoicePicker) target() string {
+	if p.Character == nil {
+		return "#step-panel"
+	}
+	return "#char-panel"
+}
+
+// previewURL plays a sample of voice saying the character's line (or the
+// narrator's caption when c is nil).
+func previewURL(st *store.Story, voice string, c *store.Character) string {
+	u := fmt.Sprintf("%s/voices/%s/preview", base(st), voice)
+	if c != nil {
+		u += fmt.Sprintf("?cid=%d", c.ID)
+	}
+	return u
+}
+
+func voiceTraits(v pipeline.Voice) string {
+	return fmt.Sprintf("%s %s, %s", v.Age, v.Gender, v.Accent)
+}
+
+// VoicePanel lists every voice; each plays the character's own line.
+templ VoicePanel(p VoicePicker) {
+	@components.SidePanel(components.SidePanelProps{Title: "A voice for " + p.who(), Description: "Press play to hear " + p.who() + " say a line in each voice, then pick one. It is used whenever the story is read aloud."}) {
+		<div class="link-list voice-list">
+			for _, v := range p.Voices {
+				<div class={ "link-row voice-row", templ.KV("voice-row--current", v.ID == p.Current) }>
+					@listenButton(previewURL(p.Story, v.ID, p.Character), "Hear "+p.who()+" as "+v.Name, "")
+					<div class="suggest__text">
+						<b>{ v.Name }</b>
+						<span class="note">{ v.Blurb + " · " + voiceTraits(v) }</span>
+					</div>
+					if v.ID == p.Current {
+						@components.Badge(components.BadgeSuccess, nil) {
+							@components.IconCheck()
+							Current
+						}
+					} else {
+						<form hx-post={ p.action() } hx-target={ p.target() } hx-swap="outerHTML">
+							<input type="hidden" name="voice" value={ v.ID }/>
+							@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm, Variant: components.ButtonOutline}) {
+								Use
+							}
+						</form>
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+// listenButton plays an audio URL on click and stops it on a second click
+// (static/app/voice.js). With a label it is a text button, else an icon.
+templ listenButton(url, aria, label string) {
+	<button type="button" class={ "listen", templ.KV("listen--label", label != "") } data-listen={ url } aria-label={ aria } title={ aria } aria-pressed="false">
+		<svg class="listen__play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"></path></svg>
+		<svg class="listen__stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2"></rect></svg>
+		<span class="listen__spin" aria-hidden="true"></span>
+		if label != "" {
+			<span>{ label }</span>
+		}
+	</button>
+}
+
+templ speakerIcon() {
+	<svg class="voice-line__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a10 10 0 0 1 0 14"></path></svg>
+}
+
+// characterVoiceLine sits on the character page: who they sound like, a
+// sample, and the way to change it.
+templ characterVoiceLine(st *store.Story, c *store.Character) {
+	{{ v := pipeline.CharacterVoice(c) }}
+	<div class="voice-line" id="char-voice">
+		@speakerIcon()
+		<div class="suggest__text">
+			<b>{ "Voice: " + v.Name }</b>
+			<span class="note">{ v.Blurb }</span>
+		</div>
+		@listenButton(previewURL(st, v.ID, c), "Hear "+c.Name, "")
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Attrs: templ.Attributes{"hx-get": charURL(st, c) + "/voice", "hx-target": "#panel-root", "hx-swap": "innerHTML"}}) {
+			Change
+		}
+	</div>
+}
+
+// narratorLine sits above the roster: the voice that reads the captions,
+// and a way to cast everyone when voices have not been cast yet.
+templ narratorLine(cv CharactersView) {
+	{{ st := cv.Story }}
+	{{ v := pipeline.NarratorVoice(st) }}
+	<div class="panel panel--soft voice-line voice-line--narrator" id="narrator-voice">
+		@speakerIcon()
+		<div class="suggest__text">
+			<b>{ "Narrator: " + v.Name }</b>
+			<span class="note">{ "Reads the captions when the story is read aloud. " + v.Blurb + "." }</span>
+		</div>
+		@listenButton(previewURL(st, v.ID, nil), "Hear the narrator", "")
+		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Attrs: templ.Attributes{"hx-get": base(st) + "/narrator", "hx-target": "#panel-root", "hx-swap": "innerHTML"}}) {
+			Change
+		}
+		if pipeline.Uncast(cv.Characters) {
+			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: cv.Job.Active(), Attrs: templ.Attributes{"hx-post": base(st) + "/voices/cast", "hx-target": "#step-panel", "hx-swap": "outerHTML", "title": "Some characters have stand-in voices. The editor picks a voice for each one from their description."}}) {
+				Cast voices
+			}
+		}
+	</div>
+}

@@ -542,3 +542,72 @@ func TestLibraryAndLink(t *testing.T) {
 		t.Fatalf("link without sheet: %+v", fourth)
 	}
 }
+
+func TestVoices(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	u, a := seed(t, s)
+	if a.NarratorVoice != "" {
+		t.Fatalf("a new story has no narrator yet: %q", a.NarratorVoice)
+	}
+	if err := s.SetNarratorVoice(ctx, a.ID, "narrator-1"); err != nil {
+		t.Fatal(err)
+	}
+	// UpdateStory (what jobs call with their copy) leaves the narrator alone.
+	a.Title = "Renamed"
+	if err := s.UpdateStory(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Story(ctx, a.ID); got.NarratorVoice != "narrator-1" || got.Title != "Renamed" {
+		t.Fatalf("story: %+v", got)
+	}
+
+	c := &Character{StoryID: a.ID, Name: "Mara", Voice: "voice-1"}
+	if err := s.InsertCharacter(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := s.Character(ctx, c.ID)
+	if stale.Voice != "voice-1" {
+		t.Fatalf("inserted voice: %q", stale.Voice)
+	}
+	if err := s.SetCharacterVoice(ctx, c.ID, "voice-2"); err != nil {
+		t.Fatal(err)
+	}
+	// A revision holding the stale copy writes its fields back: the voice
+	// picked meanwhile survives.
+	stale.Wardrobe = "a new coat"
+	if err := s.UpdateCharacter(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Character(ctx, c.ID)
+	if got.Voice != "voice-2" || got.Wardrobe != "a new coat" {
+		t.Fatalf("voice clobbered by a stale update: %+v", got)
+	}
+	if list, _ := s.Characters(ctx, a.ID); len(list) != 1 || list[0].Voice != "voice-2" {
+		t.Fatalf("characters: %+v", list)
+	}
+	lib, _ := s.Library(ctx, u.ID)
+	if len(lib) != 1 || lib[0].Character.Voice != "voice-2" || lib[0].Story.NarratorVoice != "narrator-1" {
+		t.Fatalf("library: %+v", lib[0])
+	}
+
+	// Reusing a character in another story brings the voice along; a source
+	// without one leaves the copy's own voice.
+	b, _ := s.CreateStory(ctx, u.ID, "Two", "script", "", "comic")
+	dst := &Character{StoryID: b.ID, Name: "Mara"}
+	_ = s.InsertCharacter(ctx, dst)
+	if err := s.LinkCharacter(ctx, dst, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.Character(ctx, dst.ID); again.Voice != "voice-2" || dst.Voice != "voice-2" {
+		t.Fatalf("link should copy the voice: %+v", again)
+	}
+	mute := &Character{StoryID: a.ID, Name: "Pip"}
+	_ = s.InsertCharacter(ctx, mute)
+	keeps := &Character{StoryID: b.ID, Name: "Pip", Voice: "own"}
+	_ = s.InsertCharacter(ctx, keeps)
+	_ = s.LinkCharacter(ctx, keeps, mute)
+	if again, _ := s.Character(ctx, keeps.ID); again.Voice != "own" {
+		t.Fatalf("voiceless source replaced the voice: %+v", again)
+	}
+}

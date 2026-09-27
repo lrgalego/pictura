@@ -403,6 +403,7 @@ templ CharactersPanel(v CharactersView) {
 			</div>
 		} else if len(v.Characters) > 0 {
 			@castToolbar(v, false)
+			@narratorLine(v)
 			@roster(v)
 			@castToolbar(v, true)
 		}

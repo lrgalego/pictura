@@ -20,6 +20,7 @@ import (
 	"github.com/lrgalego/htmx-ds/theme"
 
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
 )
@@ -31,18 +32,24 @@ var staticFS embed.FS
 type Deps struct {
 	Store *store.Store
 	Jobs  *jobs.Runner
-	Fake  bool // the offline provider is in use; the UI says so
+	Fake  bool             // the offline provider is in use; the UI says so
+	Voice pipeline.Speaker // text to speech; nil means the offline tones
 }
 
 type server struct {
-	st   *store.Store
-	jobs *jobs.Runner
-	fake bool
+	st      *store.Store
+	jobs    *jobs.Runner
+	fake    bool
+	voice   pipeline.Speaker
+	samples sampleCache
 }
 
 // Router wires the app.
 func Router(d Deps) http.Handler {
-	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake}
+	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake, voice: d.Voice}
+	if s.voice == nil {
+		s.voice = pipeline.FakeVoice{}
+	}
 	mux := http.NewServeMux()
 	// What htmxds.Mount would register, spelled out so the asset route can
 	// carry our cache policy (versioned URLs immutable, bare ones no-cache).
@@ -98,6 +105,12 @@ func Router(d Deps) http.Handler {
 	mux.Handle("POST /stories/{id}/characters/{cid}/refs", auth(s.characterRefs))
 	mux.Handle("POST /stories/{id}/characters/{cid}/sheet", auth(s.characterSheet))
 	mux.Handle("POST /stories/{id}/refs/{rid}/delete", auth(s.refDelete))
+	mux.Handle("GET /stories/{id}/characters/{cid}/voice", auth(s.characterVoicePanel))
+	mux.Handle("POST /stories/{id}/characters/{cid}/voice", auth(s.characterVoice))
+	mux.Handle("GET /stories/{id}/narrator", auth(s.narratorVoicePanel))
+	mux.Handle("POST /stories/{id}/narrator", auth(s.narratorVoice))
+	mux.Handle("GET /stories/{id}/voices/{voice}/preview", auth(s.voicePreview))
+	mux.Handle("POST /stories/{id}/voices/cast", auth(s.castVoices))
 
 	mux.Handle("GET /stories/{id}/pages", auth(s.pagesPage))
 	mux.Handle("GET /stories/{id}/pages/panel", auth(s.pagesPanel))
@@ -205,7 +218,7 @@ func (s *server) shell(r *http.Request, title string) views.ShellProps {
 	return views.ShellProps{
 		Title: title, User: userFrom(r.Context()), Fake: s.fake, Path: r.URL.Path,
 		CSS:     []string{versioned(assets.CSSPath), versioned("/static/app/app.css")},
-		Scripts: []string{versioned(assets.HTMXPath), versioned(assets.DSJSPath)},
+		Scripts: []string{versioned(assets.HTMXPath), versioned(assets.DSJSPath), versioned("/static/app/voice.js")},
 		Favicon: versioned("/static/app/favicon.svg"),
 	}
 }

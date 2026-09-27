@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	"github.com/lrgalego/pictura/internal/blob"
+	"github.com/lrgalego/pictura/internal/elevenlabs"
 	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/meta"
 	"github.com/lrgalego/pictura/internal/pipeline"
@@ -29,8 +30,8 @@ func main() {
 	host := flag.String("host", "127.0.0.1", "listen address (the container passes 0.0.0.0)")
 	port := flag.Int("port", 8080, "listen port")
 	dataDir := flag.String("data", "./data", "directory for the SQLite database and generated images")
-	envFile := flag.String("env-file", ".env", "optional KEY=VALUE file loaded into the environment (META_API_KEY)")
-	fakeAI := flag.Bool("fake-ai", false, "use the offline fake model provider even if META_API_KEY is set")
+	envFile := flag.String("env-file", ".env", "optional KEY=VALUE file loaded into the environment (META_API_KEY, ELEVENLABS_API_KEY)")
+	fakeAI := flag.Bool("fake-ai", false, "use the offline fake model and voice providers even if API keys are set")
 	healthCheck := flag.Bool("health-check", false, "probe /healthz on 127.0.0.1 and exit; used by the container healthcheck")
 	enableUser := flag.String("enable-user", "", "enable this account and exit (signing up does not enable an account)")
 	disableUser := flag.String("disable-user", "", "disable this account and exit")
@@ -94,11 +95,30 @@ func main() {
 	runner := jobs.New(st, ai, 3)
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", *host, *port),
-		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI}),
+		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: speaker(*fakeAI)}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("listening on %s", srv.Addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// speaker picks the text-to-speech provider: ElevenLabs when
+// ELEVENLABS_API_KEY is set (Meta's API has no speech synthesis), offline
+// tones otherwise or with --fake-ai.
+func speaker(fake bool) pipeline.Speaker {
+	key := strings.TrimSpace(os.Getenv("ELEVENLABS_API_KEY"))
+	if fake || key == "" {
+		if key == "" {
+			log.Printf("ELEVENLABS_API_KEY is not set — voices are offline placeholder tones")
+		}
+		return pipeline.FakeVoice{}
+	}
+	c := elevenlabs.New(key)
+	if m := os.Getenv("ELEVENLABS_MODEL"); m != "" {
+		c.Model = m
+	}
+	log.Printf("ElevenLabs: model=%s", c.Model)
+	return c
 }
 
 // loadEnvFile sets KEY=VALUE lines from path into the environment without
