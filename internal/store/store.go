@@ -146,6 +146,20 @@ CREATE TABLE IF NOT EXISTS refs (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
+CREATE TABLE IF NOT EXISTS page_lines (
+	id INTEGER PRIMARY KEY,
+	page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+	seq INTEGER NOT NULL,
+	kind TEXT NOT NULL DEFAULT '',
+	speaker TEXT NOT NULL DEFAULT '',
+	text TEXT NOT NULL DEFAULT '',
+	box_json TEXT NOT NULL DEFAULT '{}',
+	words_json TEXT NOT NULL DEFAULT '[]',
+	exact INTEGER NOT NULL DEFAULT 0,
+	voice TEXT NOT NULL DEFAULT '',
+	audio TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 `)
 	if err != nil {
 		return err
@@ -165,7 +179,13 @@ CREATE INDEX IF NOT EXISTS refs_story ON refs(story_id, id);
 	if err := s.addColumn("stories", "narrator_voice", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("characters", "voice", "TEXT NOT NULL DEFAULT ''")
+	if err := s.addColumn("characters", "voice", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.addColumn("pages", "reading_image", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.addColumn("pages", "reading_error", "TEXT NOT NULL DEFAULT ''")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -581,14 +601,20 @@ type Page struct {
 	Image       string
 	ImageStatus string
 	ImageError  string
+	// ReadingImage is the art the page's lines were read from; when it is
+	// not Image any more (the page was redrawn) the lines are stale.
+	// ReadingError is why the last reading failed. Both are written only
+	// by ReplacePageLines and SetReadingError.
+	ReadingImage string
+	ReadingError string
 }
 
-const pageCols = `id, story_id, number, title, summary, panels_json, image, image_status, image_error`
+const pageCols = `id, story_id, number, title, summary, panels_json, image, image_status, image_error, reading_image, reading_error`
 
 func scanPage(row scanner) (*Page, error) {
 	var p Page
 	var panels string
-	if err := row.Scan(&p.ID, &p.StoryID, &p.Number, &p.Title, &p.Summary, &panels, &p.Image, &p.ImageStatus, &p.ImageError); err != nil {
+	if err := row.Scan(&p.ID, &p.StoryID, &p.Number, &p.Title, &p.Summary, &panels, &p.Image, &p.ImageStatus, &p.ImageError, &p.ReadingImage, &p.ReadingError); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -811,12 +837,24 @@ func ThumbName(name string) string { return name + ".thumb.jpg" }
 // SaveImage stores an image (and its thumbnail) owned by a story and
 // returns its name.
 func (s *Store) SaveImage(ctx context.Context, storyID int64, ext string, data []byte) (string, error) {
+	return s.save(ctx, storyID, ext, data, true)
+}
+
+// SaveAudio stores a narration clip owned by a story. It lives with the
+// images: same ownership check, same garbage collector.
+func (s *Store) SaveAudio(ctx context.Context, storyID int64, ext string, data []byte) (string, error) {
+	return s.save(ctx, storyID, ext, data, false)
+}
+
+func (s *Store) save(ctx context.Context, storyID int64, ext string, data []byte, thumb bool) (string, error) {
 	name := randomHex(12) + "." + ext
 	if err := s.blobs.Put(ctx, name, data); err != nil {
 		return "", err
 	}
-	if thumb, err := makeThumb(data); err == nil {
-		_ = s.blobs.Put(ctx, ThumbName(name), thumb)
+	if thumb {
+		if t, err := makeThumb(data); err == nil {
+			_ = s.blobs.Put(ctx, ThumbName(name), t)
+		}
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO images (name, story_id) VALUES (?, ?)`, name, storyID); err != nil {
 		return "", err
@@ -895,15 +933,17 @@ func (s *Store) ImageNames(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-// Sweep is the garbage collector: it deletes every image the story owns
-// that no character sheet, page or reference points at any more (art that
-// was redrawn, references removed with their character), and returns how
+// Sweep is the garbage collector: it deletes every image (and narration
+// clip) the story owns that no character sheet, page, reference or read
+// line points at any more (art that was redrawn, references removed with
+// their character, clips of a line re-read or re-voiced), and returns how
 // many were reclaimed. storyID 0 sweeps every story.
 func (s *Store) Sweep(ctx context.Context, storyID int64) (int, error) {
 	q := `SELECT name FROM images i
 		WHERE NOT EXISTS (SELECT 1 FROM characters c WHERE c.sheet_image = i.name)
 		  AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.image = i.name)
-		  AND NOT EXISTS (SELECT 1 FROM refs r WHERE r.image = i.name)`
+		  AND NOT EXISTS (SELECT 1 FROM refs r WHERE r.image = i.name)
+		  AND NOT EXISTS (SELECT 1 FROM page_lines l WHERE l.audio = i.name)`
 	args := []any{}
 	if storyID != 0 {
 		q += ` AND i.story_id = ?`
@@ -1169,4 +1209,146 @@ func (s *Store) copyImage(ctx context.Context, name string, storyID int64) (stri
 		ext = "png"
 	}
 	return s.SaveImage(ctx, storyID, ext, data)
+}
+
+// ---------- read-aloud lines ----------
+
+// LineBox is a rectangle in fractions of the page (0..1).
+type LineBox struct {
+	X1 float64 `json:"x1"`
+	Y1 float64 `json:"y1"`
+	X2 float64 `json:"x2"`
+	Y2 float64 `json:"y2"`
+}
+
+// LineWord is one lettered word: where it is drawn and, once voiced, when
+// it is said in the line's clip (seconds).
+type LineWord struct {
+	Text  string  `json:"text"`
+	Box   LineBox `json:"box"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
+// PageLine is one balloon, caption or title of a drawn page, in reading
+// order, with its narration clip once voiced.
+type PageLine struct {
+	ID      int64
+	PageID  int64
+	Seq     int
+	Kind    string // bubble, caption, title, sfx
+	Speaker string // a character's name; "" is the narrator
+	Text    string
+	Box     LineBox
+	Words   []LineWord
+	Exact   bool   // word boxes measured from the ink, not estimated
+	Voice   string // the voice the clip was made with
+	Audio   string // the clip's blob name; "" until voiced
+}
+
+const lineCols = `id, page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio`
+
+func scanLine(row scanner) (*PageLine, error) {
+	var l PageLine
+	var box, words string
+	if err := row.Scan(&l.ID, &l.PageID, &l.Seq, &l.Kind, &l.Speaker, &l.Text, &box, &words, &l.Exact, &l.Voice, &l.Audio); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(box), &l.Box)
+	_ = json.Unmarshal([]byte(words), &l.Words)
+	return &l, nil
+}
+
+// PageLines lists a page's lines in reading order.
+func (s *Store) PageLines(ctx context.Context, pageID int64) ([]*PageLine, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+lineCols+` FROM page_lines WHERE page_id = ? ORDER BY seq`, pageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*PageLine
+	for rows.Next() {
+		l, err := scanLine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// StoryLines lists every page's lines, keyed by page id.
+func (s *Store) StoryLines(ctx context.Context, storyID int64) (map[int64][]*PageLine, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+prefixed("l", lineCols)+` FROM page_lines l JOIN pages p ON p.id = l.page_id WHERE p.story_id = ? ORDER BY l.page_id, l.seq`, storyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]*PageLine{}
+	for rows.Next() {
+		l, err := scanLine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[l.PageID] = append(out[l.PageID], l)
+	}
+	return out, rows.Err()
+}
+
+func prefixed(alias, cols string) string {
+	parts := strings.Split(cols, ", ")
+	for i, p := range parts {
+		parts[i] = alias + "." + p
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ReplacePageLines stores a fresh reading of a page drawn as image: the old
+// lines go (their clips are reclaimed by the next Sweep) and the page
+// remembers which art it was read from.
+func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string, lines []*PageLine) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM page_lines WHERE page_id = ?`, pageID); err != nil {
+		return err
+	}
+	for i, l := range lines {
+		box, _ := json.Marshal(l.Box)
+		words, _ := json.Marshal(orWords(l.Words))
+		res, err := tx.ExecContext(ctx, `INSERT INTO page_lines (page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			pageID, i, l.Kind, l.Speaker, l.Text, string(box), string(words), l.Exact, l.Voice, l.Audio)
+		if err != nil {
+			return err
+		}
+		l.ID, _ = res.LastInsertId()
+		l.PageID, l.Seq = pageID, i
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET reading_image = ?, reading_error = '' WHERE id = ?`, image, pageID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetLineAudio records a line's clip, the voice it was made with and the
+// words with their timings.
+func (s *Store) SetLineAudio(ctx context.Context, lineID int64, voice, audio string, words []LineWord) error {
+	b, _ := json.Marshal(orWords(words))
+	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET voice = ?, audio = ?, words_json = ? WHERE id = ?`, voice, audio, string(b), lineID)
+	return err
+}
+
+// SetReadingError records why a page could not be read aloud.
+func (s *Store) SetReadingError(ctx context.Context, pageID int64, msg string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE pages SET reading_error = ? WHERE id = ?`, msg, pageID)
+	return err
+}
+
+func orWords(w []LineWord) []LineWord {
+	if w == nil {
+		return []LineWord{}
+	}
+	return w
 }

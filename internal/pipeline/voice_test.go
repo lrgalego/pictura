@@ -109,6 +109,7 @@ func (c *castRecorder) GenerateImage(context.Context, string, string) ([]byte, e
 func (c *castRecorder) EditImage(context.Context, string, [][]byte, string) ([]byte, error) {
 	return nil, nil
 }
+func (c *castRecorder) Segment(context.Context, []byte, string) ([]Region, error) { return nil, nil }
 
 func TestCastVoices(t *testing.T) {
 	st := &store.Story{Title: "The Lighthouse", Logline: "A girl and a robot.", World: "A harbour town."}

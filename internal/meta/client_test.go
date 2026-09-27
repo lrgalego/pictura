@@ -234,3 +234,32 @@ func TestHelpers(t *testing.T) {
 		t.Fatalf("stripFence plain: %q", got)
 	}
 }
+
+func TestSegmentParsesBoxes(t *testing.T) {
+	s := metatest.New(t)
+	c := client(s)
+	got, err := c.Segment(context.Background(), []byte("PNGDATA"), "speech bubble")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 6 || got[0] != (pipeline.Region{X1: 1022, Y1: 130, X2: 1195, Y2: 250}) || got[5] != (pipeline.Region{X1: 675, Y1: 123, X2: 877, Y2: 285}) {
+		t.Fatalf("regions: %+v", got)
+	}
+	req := s.Last(t)
+	if req.Path != "/responses" || req.Body["model"] != DefaultSegmentModel || req.Body["stream"] != false {
+		t.Fatalf("request: %s %v", req.Path, req.Body["model"])
+	}
+	content := req.Body["input"].([]any)[0].(map[string]any)["content"].([]any)
+	if content[0].(map[string]any)["text"] != "speech bubble" || content[1].(map[string]any)["image_url"] != "data:image/png;base64,"+base64.StdEncoding.EncodeToString([]byte("PNGDATA")) {
+		t.Fatalf("content: %v", content)
+	}
+	// Nothing found is an empty answer, not an error.
+	s.Responses["/responses"] = metatest.Load(t, "segment_empty.json")
+	if got, err := c.Segment(context.Background(), []byte("x"), "caption box"); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+	s.Fail = &metatest.Fixture{Status: 400, Body: []byte(`{"error":{"message":"bad image","code":"invalid"}}`)}
+	if _, err := c.Segment(context.Background(), []byte("x"), "caption"); err == nil || !strings.Contains(err.Error(), "bad image") {
+		t.Fatalf("error: %v", err)
+	}
+}

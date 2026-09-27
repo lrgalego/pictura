@@ -23,6 +23,15 @@ type AI interface {
 	ChatJSON(ctx context.Context, system, user string, images []Image, schemaName string, schema map[string]any, out any) error
 	GenerateImage(ctx context.Context, prompt, size string) ([]byte, error)
 	EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error)
+	// Segment finds every instance of a noun phrase in a PNG (SAM 3.1),
+	// returning boxes in the image's pixels.
+	Segment(ctx context.Context, png []byte, phrase string) ([]Region, error)
+}
+
+// Region is a box in image pixels, top-left inclusive, bottom-right
+// exclusive.
+type Region struct {
+	X1, Y1, X2, Y2 int
 }
 
 // Reference is a writer-supplied image with its note, numbered as the

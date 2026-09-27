@@ -92,10 +92,12 @@ func main() {
 		ai = c
 	}
 
+	voice := speaker(*fakeAI)
 	runner := jobs.New(st, ai, 3)
+	runner.Voice = voice
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", *host, *port),
-		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: speaker(*fakeAI)}),
+		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: voice}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("listening on %s", srv.Addr)

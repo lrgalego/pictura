@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -720,4 +721,187 @@ func TestCastVoicesJob(t *testing.T) {
 	if st, _ := e.st.Story(e.ctx, e.sto.ID); st.NarratorVoice != pipeline.DefaultNarrator {
 		t.Fatalf("narrator: %q", st.NarratorVoice)
 	}
+}
+
+// countingVoice wraps the offline tones and counts syntheses per voice.
+type countingVoice struct {
+	mu    sync.Mutex
+	calls map[string]int
+	fail  bool
+}
+
+func (c *countingVoice) Speak(ctx context.Context, text, voice string) (*pipeline.Speech, error) {
+	c.mu.Lock()
+	if c.calls == nil {
+		c.calls = map[string]int{}
+	}
+	c.calls[voice]++
+	fail := c.fail
+	c.mu.Unlock()
+	if fail {
+		return nil, errors.New("voice down")
+	}
+	return pipeline.FakeVoice{}.Speak(ctx, text, voice)
+}
+
+func (c *countingVoice) total() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, v := range c.calls {
+		n += v
+	}
+	return n
+}
+
+func (e *env) drawnBook() {
+	e.t.Helper()
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	_ = e.r.DrawSheets(e.sto.ID)
+	e.mustDone("draw")
+	_ = e.r.Breakdown(e.sto.ID)
+	e.mustDone("breakdown")
+	_ = e.r.RenderAll(e.sto.ID)
+	e.wait() // drawing, then the chained narration (which callers check)
+}
+
+func TestNarrateAfterDrawing(t *testing.T) {
+	e := newEnv(t)
+	voice := &countingVoice{}
+	e.r.Voice = voice
+	e.drawnBook()
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobDone {
+		t.Fatalf("drawing the book should chain the narration: %+v", j)
+	}
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	chars := e.chars()
+	lines, _ := e.st.StoryLines(e.ctx, e.sto.ID)
+	spoken := 0
+	for _, p := range e.pages() {
+		if !NarrationReady(sto, chars, p, lines[p.ID]) {
+			t.Fatalf("page %d not ready: %+v", p.Number, p)
+		}
+		if len(lines[p.ID]) == 0 {
+			t.Fatalf("page %d has no lines", p.Number)
+		}
+		for _, l := range lines[p.ID] {
+			if !l.Exact || l.Audio == "" || l.Voice != VoiceFor(sto, chars, l.Speaker).ID {
+				t.Fatalf("line: %+v", l)
+			}
+			if l.Kind == "bubble" && l.Speaker == "" {
+				t.Fatalf("a bubble lost its speaker: %+v", l)
+			}
+			for i, w := range l.Words {
+				if w.End <= w.Start || (i > 0 && w.Start < l.Words[i-1].Start) {
+					t.Fatalf("timings: %+v", l.Words)
+				}
+			}
+			if b, err := e.st.ReadImage(e.ctx, l.Audio); err != nil || string(b[:4]) != "RIFF" {
+				t.Fatalf("clip %s: %v", l.Audio, err)
+			}
+			spoken++
+		}
+	}
+	if voice.total() != spoken {
+		t.Fatalf("%d syntheses for %d lines", voice.total(), spoken)
+	}
+
+	// Nothing changed: nothing is read or voiced again.
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("narrate again")
+	if voice.total() != spoken {
+		t.Fatalf("re-narrating an unchanged book cost %d syntheses", voice.total()-spoken)
+	}
+
+	// A new voice for one character: only their lines are voiced again,
+	// and the old clips are reclaimed.
+	var who *store.Character
+	var theirs int
+	for _, c := range chars {
+		n := 0
+		for _, ls := range lines {
+			for _, l := range ls {
+				if l.Speaker == c.Name {
+					n++
+				}
+			}
+		}
+		if n > 0 {
+			who, theirs = c, n
+			break
+		}
+	}
+	oldClip := ""
+	for _, ls := range lines {
+		for _, l := range ls {
+			if l.Speaker == who.Name {
+				oldClip = l.Audio
+			}
+		}
+	}
+	_ = e.st.SetCharacterVoice(e.ctx, who.ID, "pqHfZKP75CvOlQylNhV4")
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("revoice")
+	if got := voice.total() - spoken; got != theirs {
+		t.Fatalf("revoicing %s took %d syntheses, want %d", who.Name, got, theirs)
+	}
+	if _, err := e.st.ReadImage(e.ctx, oldClip); err == nil {
+		t.Fatal("the replaced clip should be swept")
+	}
+
+	// A redrawn page is read again; the others are not.
+	before := voice.total()
+	p0 := e.pages()[0]
+	_ = e.r.RenderPage(e.sto.ID, p0.ID, "brighter")
+	e.mustDone("redraw")
+	if p, _ := e.st.Page(e.ctx, p0.ID); p.ReadingImage == p.Image {
+		t.Fatal("a redrawn page's reading is stale")
+	}
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("narrate redrawn")
+	if got := voice.total() - before; got != len(lines[p0.ID]) {
+		t.Fatalf("re-reading one page took %d syntheses, want %d", got, len(lines[p0.ID]))
+	}
+}
+
+func TestNarrateFailures(t *testing.T) {
+	e := newEnv(t)
+	voice := &countingVoice{fail: true}
+	e.r.Voice = voice
+	e.drawnBook()
+	// Drawing succeeded; the chained narration failed and says why, per page.
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobError || !strings.Contains(j.Error, "voice down") {
+		t.Fatalf("narrate job: %+v", j)
+	}
+	for _, p := range e.pages() {
+		if p.ImageStatus != store.ImageReady || p.ReadingError == "" || p.ReadingImage != p.Image {
+			t.Fatalf("page: %+v", p)
+		}
+	}
+	// The reading is kept; only the voicing is retried.
+	voice.fail = false
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("retry")
+	for _, p := range e.pages() {
+		if p.ReadingError != "" {
+			t.Fatalf("error not cleared: %+v", p)
+		}
+	}
+	// A reading that fails is recorded too.
+	e2 := newEnv(t)
+	e2.drawnBook()
+	p := e2.pages()[0]
+	_ = e2.r.RenderPage(e2.sto.ID, p.ID, "")
+	e2.mustDone("redraw")
+	e2.ai.failChat = true
+	_ = e2.r.Narrate(e2.sto.ID)
+	e2.mustFail("narrate", "chat down")
+	if got, _ := e2.st.Page(e2.ctx, p.ID); !strings.Contains(got.ReadingError, "chat down") {
+		t.Fatalf("reading error: %+v", got)
+	}
+	// No drawn pages: nothing to do.
+	e3 := newEnv(t)
+	_ = e3.r.Narrate(e3.sto.ID)
+	e3.mustDone("narrate empty")
 }

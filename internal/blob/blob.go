@@ -35,6 +35,10 @@ func ContentType(name string) string {
 		return "image/webp"
 	case ".gif":
 		return "image/gif"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
 	}
 	return "application/octet-stream"
 }

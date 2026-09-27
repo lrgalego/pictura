@@ -23,3 +23,9 @@ R2_ACCOUNT_ID=op://pictura/cloudflare-r2/account id
 R2_ACCESS_KEY_ID=op://pictura/cloudflare-r2/access key id
 R2_SECRET_ACCESS_KEY=op://pictura/cloudflare-r2/secret access key
 R2_BUCKET=pictura-media
+
+# Text to speech for read-aloud (Meta's Model API has no speech synthesis).
+# A restricted ElevenLabs key: text to speech, voices read, forced
+# alignment, models, user. Without it the app falls back to placeholder
+# tones, so keep this line.
+ELEVENLABS_API_KEY=op://pictura/elevenlabs-api/credential

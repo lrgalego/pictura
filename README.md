@@ -11,6 +11,7 @@ The workflow, one screen per step:
 2. **Characters** — every character gets an illustrator-ready description first, and a voice cast from their age and temperament (the narrator too); press play to hear any character say their line in any voice and pick another. Attach reference images (photos, sketches, outfits, props) to any character, upload a finished model sheet to use as-is, or reuse a character from another story; adjust the words, then draw the remaining sheets from the references. Afterwards adjust, redraw or edit any character.
 3. **Pages** — the script becomes pages of panels with shots, dialogue and captions. Adjust one page or the whole plan.
 4. **Comic** — pages are drawn with the character sheets as references so the cast stays on-model. Redraw any page with notes; download as PDF or a zip of PNGs.
+5. **Read to me** — the finished comic is read aloud page by page, every balloon in its speaker's voice and the captions by the narrator, while a highlighter follows each word on the drawn page (the balloon being read is spotlit; on phones the page zooms in to follow it). Tap a balloon to hear it again; pages turn by themselves.
 
 Signing up creates a disabled account parked on a "waiting to be enabled"
 page; an operator enables it (see below). Accounts keep a library of stories
@@ -55,10 +56,23 @@ speech synthesis): `ELEVENLABS_API_KEY`, resolved in development from
 to speech, voices read, forced alignment, models, user). The default model
 is `eleven_v3`, the most expressive; `ELEVENLABS_MODEL` overrides it.
 Without a key, or with `--fake-ai`, voices are placeholder tones, one per
-word, timed like real speech. The account is on the free plan (10k
-characters a month, no commercial use): production needs a paid plan and
-its own `elevenlabs-api` vault item before the key goes into
-`.env.production.tpl`.
+word, timed like real speech. Production resolves its own key,
+`op://pictura/elevenlabs-api`, through `.env.production.tpl`. Both keys
+belong to one account on the free plan (10k characters a month, no
+commercial use), so real use needs a paid plan.
+
+How a page is read aloud (`internal/pipeline/lettering.go`, run by the
+`narrate` job when the whole book has been drawn, or when the reader asks):
+the drawn page, not the storyboard, is the truth, since the image model
+sometimes letters what the plan did not ask for. Muse Spark reads the
+lettering in reading order with who says each line (checked against the
+script) and rough word boxes; SAM 3.1 boxes every "speech bubble" and
+"caption"; inside each box the ink is split into rows and words by the gaps
+between glyphs, guided by what Spark read, which gives pixel-exact word
+boxes. Each line is voiced once (ElevenLabs reports when every character is
+spoken) and kept with its clip; redrawing a page re-reads only that page,
+and changing a voice re-voices only that speaker's lines. The player
+(`web/static/reader.js`) moves the highlight from the audio clock.
 
 ## Images
 
@@ -102,9 +116,9 @@ shipyard ssh 'cd /opt/pictura && sudo docker compose run --rm --no-deps server -
 |---|---|
 | `cmd/server` | the binary: flags, `.env` loading, provider selection |
 | `internal/store` | SQLite (modernc, pure Go): users, sessions, stories, characters, pages, jobs, images |
-| `internal/meta` | Meta Model API client: chat completions with JSON schema, image generations/edits |
+| `internal/meta` | Meta Model API client: chat completions with JSON schema, image generations/edits, SAM 3.1 segmentation |
 | `internal/elevenlabs` | ElevenLabs text to speech with per-character timestamps, grouped into words |
-| `internal/pipeline` | prompts, schemas and the `AI` interface; `fake.go` is the offline provider; `voice.go` the voice catalog, casting and the `Speaker` interface (`fakevoice.go` offline) |
+| `internal/pipeline` | prompts, schemas and the `AI` interface; `fake.go` is the offline provider; `voice.go` the voice catalog, casting and the `Speaker` interface (`fakevoice.go` offline); `lettering.go` reads a drawn page's lettering into word boxes (`fakeletters.go` letters the placeholder pages to match) |
 | `internal/jobs` | background runner: one job per story, concurrent image drawing, progress for the UI |
 | `internal/pdf` | minimal PDF writer (one JPEG page per comic page) |
 | `web` | routes, auth, handlers; `web/views` templ pages; `web/static/app.css` the brand theme |

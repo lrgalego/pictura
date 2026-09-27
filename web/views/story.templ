@@ -674,6 +674,12 @@ templ bookToolbar(v PagesView) {
 	<div class="toolbar">
 		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
 		<span class="toolbar__spacer"></span>
+		if readyCount(v.Pages) > 0 {
+			@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/read", Class: "read-cta"}) {
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"></path></svg>
+				Read to me
+			}
+		}
 		if readyCount(v.Pages) < len(v.Pages) && !v.Job.Active() {
 			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"hx-post": base(v.Story) + "/book/draw", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 				@components.IconRefreshCw()

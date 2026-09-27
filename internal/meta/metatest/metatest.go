@@ -66,6 +66,7 @@ func New(t testing.TB) *Server {
 		"/chat/completions":   Load(t, "chat_completion.json"),
 		"/images/generations": Load(t, "image_generation.json"),
 		"/images/edits":       Load(t, "image_edit.json"),
+		"/responses":          Load(t, "segment.json"),
 	}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)

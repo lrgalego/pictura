@@ -559,3 +559,94 @@ h1, h2, h3, .display {
   .listen, .listen:hover, .listen:active { transition: none; transform: none; }
   .listen.is-loading .listen__spin { animation-duration: 2s; }
 }
+
+/* ---------- read to me ---------- */
+/* A dark stage whatever the theme: the page is the light source. */
+.reader {
+  --stage: #17132b; --stage-2: #221b3a; --stage-ink: #f6efe2; --stage-muted: #b9b0cf;
+  display: flex; flex-direction: column; gap: 0.75rem;
+  background: radial-gradient(120% 90% at 50% 0%, var(--stage-2), var(--stage) 70%);
+  color: var(--stage-ink); border: 3px solid var(--ink); border-radius: 0.5rem; box-shadow: 6px 6px 0 var(--ink);
+  padding: 0.75rem 0.75rem 1rem; margin: 0.5rem 0 1.5rem;
+  /* The whole reader fits the screen below the site bar; the stage takes
+     whatever the bar, the speaker line and the controls leave. */
+  height: calc(100svh - 6.5rem); min-height: 28rem;
+}
+.reader__bar { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.reader__back { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--stage-muted); text-decoration: none; font-size: var(--text-sm); flex: none; }
+.reader__back:hover { color: var(--stage-ink); }
+.reader__back svg, .reader__ctl svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.reader__title { flex: 1; margin: 0; font-family: var(--font-display); font-size: 1.25rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader__pageno { flex: none; font-size: var(--text-sm); color: var(--stage-muted); min-width: 6.5rem; text-align: right; }
+
+.reader__stage { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; border-radius: 0.35rem; }
+.reader__sheet { position: relative; height: 100%; aspect-ratio: 2 / 3; max-width: 100%; transform-origin: 0 0; transition: transform 0.6s cubic-bezier(.2,.8,.2,1); box-shadow: 0 12px 40px rgb(0 0 0 / 0.45); background: #fff; }
+.reader__sheet.is-turning { animation: reader-turn 0.65s cubic-bezier(.2,.8,.2,1); }
+@keyframes reader-turn {
+  from { opacity: 0; transform: perspective(1400px) translateX(14%) rotateY(-18deg); }
+  to { opacity: 1; transform: none; }
+}
+.reader__img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.reader__overlay { position: absolute; inset: 0; }
+.reader__overlay > div, .reader__hot { position: absolute; }
+.reader__hotspots { inset: 0; }
+/* The spotlight dims everything but the balloon being read. */
+.reader__spot { border-radius: 1rem; box-shadow: 0 0 0 200vmax rgb(23 19 43 / 0.42); outline: 3px solid var(--pop); outline-offset: 2px; pointer-events: none; transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease; }
+/* The highlighter: a marker stroke over the word being said. */
+.reader__hl { border-radius: 0.3em 0.45em 0.35em 0.5em; background: rgb(255 210 63 / 0.55); mix-blend-mode: multiply; pointer-events: none; transition: left .12s ease, top .12s ease, width .12s ease, height .12s ease; }
+.reader__hl.is-pop { animation: reader-pop .22s ease-out; }
+@keyframes reader-pop { from { transform: scale(1.18); } to { transform: none; } }
+.reader__hot { border: 0; padding: 0; background: transparent; border-radius: 0.8rem; cursor: pointer; }
+.reader__hot:hover { background: rgb(255 210 63 / 0.12); }
+.reader__hot:focus-visible { outline: 3px solid var(--pop-3); }
+[hidden].reader__spot, [hidden].reader__hl { display: none; }
+
+.reader__cover, .reader__end { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; background: rgb(23 19 43 / 0.72); backdrop-filter: blur(2px); text-align: center; padding: 1rem; }
+.reader__cover[hidden], .reader__end[hidden], .reader__wait[hidden] { display: none; }
+.reader__big { width: 6.5rem; height: 6.5rem; border-radius: 999px; border: 4px solid var(--ink); background: var(--pop); color: #221b3a; box-shadow: 5px 5px 0 #000; cursor: pointer; display: grid; place-items: center; position: relative; transition: transform .1s ease, box-shadow .1s ease; }
+/* A ring ripples out from the button, inviting a tap; the button itself
+   holds still. */
+.reader__big::after { content: ""; position: absolute; inset: -4px; border-radius: 999px; border: 3px solid var(--pop); pointer-events: none; animation: reader-ring 2.2s ease-out infinite; }
+.reader__big svg { width: 3rem; height: 3rem; fill: currentColor; margin-left: 0.35rem; }
+.reader__big:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 #000; }
+.reader__big:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+.reader__big:focus-visible { outline: 4px solid var(--pop-3); outline-offset: 4px; }
+@keyframes reader-ring { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.45); } }
+.reader__cover-title, .reader__end-title { font-family: var(--font-display); font-weight: 800; font-size: 2.2rem; line-height: 1; color: var(--stage-ink); text-shadow: 3px 3px 0 #000; }
+.reader__end-title { font-size: 3.2rem; color: var(--pop); }
+.reader__status { color: var(--stage-muted); font-size: var(--text-sm); max-width: 28rem; }
+.reader__end-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 0.5rem; }
+
+.reader__wait { position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.6rem; max-width: calc(100% - 2rem); padding: 0.55rem 1rem; border-radius: 999px; background: var(--stage-2); border: 2px solid var(--stage-muted); font-size: var(--text-sm); }
+.reader__spinner { width: 1rem; height: 1rem; flex: none; border-radius: 50%; border: 2px solid var(--pop); border-right-color: transparent; animation: listen-spin .8s linear infinite; }
+
+.reader__who { min-height: 1.6rem; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--pop); }
+.reader__who--narrator { color: var(--pop-3); }
+
+.reader__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem; }
+.reader__ctl { width: 2.75rem; height: 2.75rem; border-radius: 999px; border: 2px solid var(--stage-muted); background: transparent; color: var(--stage-ink); display: grid; place-items: center; cursor: pointer; }
+.reader__ctl:hover { border-color: var(--stage-ink); background: rgb(255 255 255 / 0.06); }
+.reader__ctl:focus-visible, .reader__pill:focus-visible { outline: 3px solid var(--pop-3); outline-offset: 2px; }
+.reader__ctl--play { width: 3.75rem; height: 3.75rem; border: 3px solid var(--ink); background: var(--pop); color: #221b3a; box-shadow: 3px 3px 0 #000; }
+.reader__ctl--play:hover { background: var(--pop); border-color: var(--ink); }
+.reader__ctl--play svg { width: 1.6rem; height: 1.6rem; stroke: none; }
+.reader__ctl--play .fill { fill: currentColor; }
+.reader__ctl .i-pause, .reader__ctl.is-playing .i-play { display: none; }
+.reader__ctl.is-playing .i-pause { display: block; }
+.reader__sep { width: 1px; height: 1.8rem; background: var(--stage-muted); opacity: 0.4; margin: 0 0.25rem; }
+.reader__pill { display: inline-flex; align-items: center; min-height: 2.25rem; padding: 0 0.9rem; border-radius: 999px; border: 2px solid var(--stage-muted); background: transparent; color: var(--stage-ink); font: inherit; font-size: var(--text-sm); font-weight: 700; cursor: pointer; text-decoration: none; }
+.reader__pill[aria-pressed="true"] { background: var(--stage-ink); color: var(--stage); border-color: var(--stage-ink); }
+.reader__pill--pop { background: var(--pop); color: #221b3a; border-color: var(--ink); box-shadow: 3px 3px 0 #000; }
+.read-cta { background: var(--pop) !important; color: #221b3a !important; border: 2px solid var(--ink) !important; box-shadow: 3px 3px 0 var(--ink); font-weight: 800; }
+
+@media (max-width: 560px) {
+  .reader { padding: 0.5rem; margin: 0 -0.5rem 1rem; border-width: 2px; box-shadow: none; height: calc(100svh - 4.5rem); }
+  .reader__back span { display: none; }
+  .reader__title { font-size: 1.05rem; text-align: left; }
+  .reader__sep { display: none; }
+  .reader__ctl { width: 2.5rem; height: 2.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader__sheet, .reader__spot, .reader__hl { transition: none; }
+  .reader__sheet.is-turning, .reader__hl.is-pop, .reader__big::after { animation: none; }
+}

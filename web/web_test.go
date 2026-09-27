@@ -78,6 +78,11 @@ func (g *gated) EditImage(ctx context.Context, prompt string, refs [][]byte, siz
 	defer g.mu.RUnlock()
 	return g.Fake.EditImage(ctx, prompt, refs, size)
 }
+func (g *gated) Segment(ctx context.Context, png []byte, phrase string) ([]pipeline.Region, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.Fake.Segment(ctx, png, phrase)
+}
 
 // hold blocks model calls until release; the next job stays "running".
 func (e *env) hold()    { e.ai.mu.Lock() }

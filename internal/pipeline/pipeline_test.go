@@ -107,6 +107,9 @@ func (r *recorder) GenerateImage(ctx context.Context, prompt, size string) ([]by
 func (r *recorder) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
 	return nil, nil
 }
+func (r *recorder) Segment(ctx context.Context, png []byte, phrase string) ([]Region, error) {
+	return nil, nil
+}
 
 func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 	ctx := context.Background()
@@ -200,6 +203,9 @@ func (empty) GenerateImage(ctx context.Context, prompt, size string) ([]byte, er
 	return nil, nil
 }
 func (empty) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+	return nil, nil
+}
+func (empty) Segment(ctx context.Context, png []byte, phrase string) ([]Region, error) {
 	return nil, nil
 }
 

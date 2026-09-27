@@ -127,6 +127,9 @@ func Router(d Deps) http.Handler {
 	mux.Handle("POST /stories/{id}/book/draw", auth(s.bookDraw))
 	mux.Handle("GET /stories/{id}/book/{pid}/redraw", auth(s.pageRedrawDialog))
 	mux.Handle("POST /stories/{id}/book/{pid}/redraw", auth(s.pageRedraw))
+	mux.Handle("GET /stories/{id}/read", auth(s.readPage))
+	mux.Handle("GET /stories/{id}/read.json", auth(s.readData))
+	mux.Handle("POST /stories/{id}/read/prepare", auth(s.readPrepare))
 	mux.Handle("GET /stories/{id}/download.pdf", auth(s.downloadPDF))
 	mux.Handle("GET /stories/{id}/download.zip", auth(s.downloadZip))
 

@@ -435,3 +435,124 @@ func TestMobileLayoutHasNoHorizontalOverflow(t *testing.T) {
 		}
 	}
 }
+
+// drawnComic takes a fresh story from script to drawn book through the UI.
+func drawnComic(t *testing.T, page playwright.Page, user string) int {
+	t.Helper()
+	signup(t, page, user)
+	createStory(t, page, "The Lighthouse Keeper's Robot", "Storybook")
+	must(t, page.Locator("button:has-text('Draw the character sheets')").First().Click())
+	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(3))
+	must(t, page.Locator("button:has-text('Storyboard the pages')").First().Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pages$`)))
+	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))
+	pages, _ := page.Locator(".pg").Count()
+	must(t, page.Locator("button:has-text('Draw the pages')").First().Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/book$`)))
+	must(t, expect.Locator(page.Locator(".leaf__art img")).ToHaveCount(pages))
+	return pages
+}
+
+func number(t *testing.T, v any) float64 {
+	t.Helper()
+	switch n := v.(type) {
+	case int:
+		return float64(n)
+	case float64:
+		return n
+	}
+	t.Fatalf("not a number: %T %v", v, v)
+	return 0
+}
+
+func TestReadToMe(t *testing.T) {
+	page := newPage(t)
+	pages := drawnComic(t, page, "reader")
+
+	// Drawing the book prepares the narration; the reader opens on a cover.
+	must(t, page.Locator("a:has-text('Read to me')").Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/read$`)))
+	must(t, expect.Locator(page.Locator(".reader__status")).ToContainText("ready when you are", playwright.LocatorAssertionsToContainTextOptions{Timeout: playwright.Float(30000)}))
+	must(t, page.Locator("[data-act=start]").Click())
+	must(t, expect.Locator(page.Locator(".reader__cover")).ToBeHidden())
+	must(t, expect.Locator(page.Locator(".reader__pageno")).ToHaveText(fmt.Sprintf("Page 1 of %d", pages)))
+
+	// A voice speaks, the balloon is spotlit and the highlighter walks
+	// across the words, always inside the balloon.
+	must(t, expect.Locator(page.Locator(".reader__hl")).ToBeVisible())
+	must(t, expect.Locator(page.Locator(".reader__who")).Not().ToBeEmpty())
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(1))
+	seen := map[string]bool{}
+	for i := 0; i < 40 && len(seen) < 3; i++ {
+		pos, err := page.Evaluate(`(() => {
+			const h = document.querySelector('.reader__hl'), s = document.querySelector('.reader__spot');
+			const a = h.getBoundingClientRect(), b = s.getBoundingClientRect();
+			return { key: h.style.left + ',' + h.style.top, inside: a.left >= b.left - 2 && a.right <= b.right + 2 && a.top >= b.top - 2 && a.bottom <= b.bottom + 2 };
+		})()`)
+		must(t, err)
+		m := pos.(map[string]any)
+		if m["inside"] != true {
+			t.Fatalf("the highlighted word left its balloon: %v", m)
+		}
+		seen[m["key"].(string)] = true
+		page.WaitForTimeout(100)
+	}
+	if len(seen) < 3 {
+		t.Fatalf("the highlight should move from word to word, saw %d positions", len(seen))
+	}
+	if dir := os.Getenv("E2E_SHOTS"); dir != "" {
+		_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(dir + "/reader-playing.png")})
+	}
+
+	// Pause and resume; speed; a tap on a balloon replays it.
+	must(t, page.Locator("[data-act=play]").Click())
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(0))
+	must(t, page.Locator("[data-act=speed]").Click())
+	must(t, expect.Locator(page.Locator("[data-act=speed]")).ToHaveText("1.25×"))
+	must(t, page.Locator(".reader__hot").First().Click())
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(1))
+
+	// Turn to the last page by keyboard and let it play out to the end.
+	for i := 1; i < pages; i++ {
+		must(t, page.Keyboard().Press("ArrowDown"))
+		must(t, expect.Locator(page.Locator(".reader__pageno")).ToHaveText(fmt.Sprintf("Page %d of %d", i+1, pages)))
+	}
+	must(t, expect.Locator(page.Locator(".reader__end")).ToBeVisible(playwright.LocatorAssertionsToBeVisibleOptions{Timeout: playwright.Float(45000)}))
+	must(t, expect.Locator(page.Locator(".reader__end")).ToContainText("The End"))
+	must(t, page.Locator("[data-act=again]").Click())
+	must(t, expect.Locator(page.Locator(".reader__pageno")).ToHaveText(fmt.Sprintf("Page 1 of %d", pages)))
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(1))
+}
+
+func TestReadToMeOnAPhone(t *testing.T) {
+	desk := newPage(t)
+	drawnComic(t, desk, "pocket")
+	cookies, err := desk.Context().Cookies()
+	must(t, err)
+	ctx, err := browser.NewContext(playwright.BrowserNewContextOptions{Viewport: &playwright.Size{Width: 390, Height: 844}, HasTouch: playwright.Bool(true), IsMobile: playwright.Bool(true), ReducedMotion: playwright.ReducedMotionReduce})
+	must(t, err)
+	t.Cleanup(func() { ctx.Close() })
+	var add []playwright.OptionalCookie
+	for _, c := range cookies {
+		add = append(add, c.ToOptionalCookie())
+	}
+	must(t, ctx.AddCookies(add))
+	page, err := ctx.NewPage()
+	must(t, err)
+	goto_(t, page, desk.URL()+"/../read")
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/read$`)))
+	must(t, expect.Locator(page.Locator(".reader__status")).ToContainText("ready when you are", playwright.LocatorAssertionsToContainTextOptions{Timeout: playwright.Float(30000)}))
+	w, err := page.Evaluate(`document.documentElement.scrollWidth`)
+	must(t, err)
+	if number(t, w) > 390 {
+		t.Fatalf("the reader overflows on a phone: %v", w)
+	}
+	// Zoom follows the balloon on small screens.
+	must(t, expect.Locator(page.Locator("[data-act=zoom]")).ToHaveAttribute("aria-pressed", "true"))
+	must(t, page.Locator("[data-act=start]").Tap())
+	must(t, expect.Locator(page.Locator(".reader__sheet.is-zoomed")).ToHaveCount(1))
+	must(t, expect.Locator(page.Locator(".reader__hl")).ToBeVisible())
+	if dir := os.Getenv("E2E_SHOTS"); dir != "" {
+		_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(dir + "/reader-phone.png")})
+	}
+}

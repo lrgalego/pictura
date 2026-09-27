@@ -1,6 +1,7 @@
 // Package meta is a small client for the Meta Model API
 // (https://api.meta.ai/v1): OpenAI-compatible chat completions with
-// structured output, and the Muse Image generation / edit endpoints.
+// structured output, the Muse Image generation / edit endpoints, and SAM
+// 3.1 segmentation through the Responses API.
 package meta
 
 import (
@@ -11,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,29 +21,32 @@ import (
 )
 
 const (
-	DefaultBaseURL    = "https://api.meta.ai/v1"
-	DefaultTextModel  = "muse-spark-1.3-contributor"
-	DefaultImageModel = "muse-image-1.0"
+	DefaultBaseURL      = "https://api.meta.ai/v1"
+	DefaultTextModel    = "muse-spark-1.3-contributor"
+	DefaultImageModel   = "muse-image-1.0"
+	DefaultSegmentModel = "sam-3.1"
 )
 
 // Client talks to the Meta Model API.
 type Client struct {
-	APIKey     string
-	BaseURL    string
-	TextModel  string
-	ImageModel string
-	HTTP       *http.Client
+	APIKey       string
+	BaseURL      string
+	TextModel    string
+	ImageModel   string
+	SegmentModel string
+	HTTP         *http.Client
 }
 
 // New returns a client with the default models and a generous timeout —
 // image generation regularly takes a minute.
 func New(apiKey string) *Client {
 	return &Client{
-		APIKey:     apiKey,
-		BaseURL:    DefaultBaseURL,
-		TextModel:  DefaultTextModel,
-		ImageModel: DefaultImageModel,
-		HTTP:       &http.Client{Timeout: 6 * time.Minute},
+		APIKey:       apiKey,
+		BaseURL:      DefaultBaseURL,
+		TextModel:    DefaultTextModel,
+		ImageModel:   DefaultImageModel,
+		SegmentModel: DefaultSegmentModel,
+		HTTP:         &http.Client{Timeout: 6 * time.Minute},
 	}
 }
 
@@ -245,4 +251,65 @@ func (c *Client) image(ctx context.Context, path string, req imageRequest) ([]by
 		return io.ReadAll(io.LimitReader(res.Body, 64<<20))
 	}
 	return nil, fmt.Errorf("meta api: image response carried neither b64_json nor url")
+}
+
+// ---------- segmentation ----------
+
+type segmentContent struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+}
+
+type segmentInput struct {
+	Type    string           `json:"type"`
+	Role    string           `json:"role"`
+	Content []segmentContent `json:"content"`
+}
+
+type segmentRequest struct {
+	Model  string         `json:"model"`
+	Input  []segmentInput `json:"input"`
+	Stream bool           `json:"stream"`
+}
+
+type segmentResponse struct {
+	Output []struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+}
+
+// boxRe matches one detection in SAM's special-token output: the box in
+// source pixels, xyxy, followed by the frame size.
+var boxRe = regexp.MustCompile(`<\|box;x1=(-?\d+);y1=(-?\d+);x2=(-?\d+);y2=(-?\d+);w=(\d+);h=(\d+)\|>`)
+
+// Segment finds every instance of a short noun phrase ("speech bubble") in
+// a PNG and returns their boxes in the image's pixels. Masks are ignored.
+func (c *Client) Segment(ctx context.Context, png []byte, phrase string) ([]pipeline.Region, error) {
+	req := segmentRequest{Model: c.SegmentModel, Input: []segmentInput{{
+		Type: "message", Role: "user",
+		Content: []segmentContent{
+			{Type: "input_text", Text: phrase},
+			{Type: "input_image", ImageURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)},
+		},
+	}}}
+	var resp segmentResponse
+	if err := c.post(ctx, "/responses", req, &resp); err != nil {
+		return nil, err
+	}
+	var out []pipeline.Region
+	for _, o := range resp.Output {
+		for _, ct := range o.Content {
+			for _, m := range boxRe.FindAllStringSubmatch(ct.Text, -1) {
+				var v [4]int
+				for i := range v {
+					v[i], _ = strconv.Atoi(m[i+1])
+				}
+				out = append(out, pipeline.Region{X1: v[0], Y1: v[1], X2: v[2], Y2: v[3]})
+			}
+		}
+	}
+	return out, nil
 }

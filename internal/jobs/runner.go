@@ -21,6 +21,9 @@ import (
 // for everything on the story and, once at the head of the queue, stops
 // later character jobs from starting so it cannot be starved.
 type Runner struct {
+	// Voice speaks the read-aloud lines; New sets the offline tones.
+	Voice pipeline.Speaker
+
 	st           *store.Store
 	ai           pipeline.AI
 	mu           sync.Mutex
@@ -44,7 +47,7 @@ func New(st *store.Store, ai pipeline.AI, images int) *Runner {
 	if images < 1 {
 		images = 1
 	}
-	return &Runner{st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, imgSem: make(chan struct{}, images)}
+	return &Runner{Voice: pipeline.FakeVoice{}, st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, imgSem: make(chan struct{}, images)}
 }
 
 // Wait blocks until every queued and running job has finished (tests, shutdown).
@@ -823,7 +826,9 @@ func (r *Runner) RenderAll(storyID int64) error {
 		if firstErr != nil {
 			return fmt.Errorf("some pages failed: %w", firstErr)
 		}
-		return nil
+		// The whole book is drawn: get it ready to be read aloud, so the
+		// reader starts the moment someone presses play.
+		return r.Narrate(storyID)
 	})
 }
 
@@ -907,4 +912,177 @@ func Elapsed(j *store.Job) time.Duration {
 		return 0
 	}
 	return time.Since(j.CreatedAt).Round(time.Second)
+}
+
+// ---------- read aloud ----------
+
+// Narrate gets a story ready to be read aloud: every drawn page whose art
+// changed since it was last read is read again (the lettering, who says
+// what, where each word is), and every line without a clip in its
+// speaker's current voice is voiced. Pages go in order, a few at a time,
+// so the first page is ready first.
+func (r *Runner) Narrate(storyID int64) error {
+	return r.start(storyID, "narrate", "Getting the voices ready…", 0, func(ctx context.Context, report reporter) error {
+		chars, err := r.st.Characters(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		if pipeline.Uncast(chars) {
+			r.castVoices(ctx, storyID)
+		}
+		story, err := r.st.Story(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		if chars, err = r.st.Characters(ctx, storyID); err != nil {
+			return err
+		}
+		pages, err := r.st.Pages(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		var todo []*store.Page
+		for _, p := range pages {
+			if p.ImageStatus == store.ImageReady && p.Image != "" {
+				todo = append(todo, p)
+			}
+		}
+		total := len(todo)
+		if total == 0 {
+			return nil
+		}
+		var mu sync.Mutex
+		done := 0
+		var firstErr error
+		report(0, total, fmt.Sprintf("Getting the voices ready (0/%d pages)…", total))
+		sem := make(chan struct{}, 3)
+		var wg sync.WaitGroup
+		for _, p := range todo {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(p *store.Page) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				err := r.narratePage(ctx, story, chars, p)
+				mu.Lock()
+				done++
+				if err != nil {
+					log.Printf("narrate story %d page %d: %v", storyID, p.Number, err)
+					_ = r.st.SetReadingError(ctx, p.ID, err.Error())
+					if firstErr == nil {
+						firstErr = err
+					}
+				}
+				report(done, total, fmt.Sprintf("Getting the voices ready (%d/%d pages)…", done, total))
+				mu.Unlock()
+			}(p)
+		}
+		wg.Wait()
+		if firstErr != nil {
+			return fmt.Errorf("some pages could not be read aloud: %w", firstErr)
+		}
+		return nil
+	})
+}
+
+// NarrationReady reports whether a drawn page can be read aloud as it is:
+// read from its current art, every line voiced in its speaker's voice.
+func NarrationReady(story *store.Story, chars []*store.Character, p *store.Page, lines []*store.PageLine) bool {
+	if p.ImageStatus != store.ImageReady || p.Image == "" || p.ReadingImage != p.Image {
+		return false
+	}
+	for _, l := range lines {
+		if len(l.Words) > 0 && (l.Audio == "" || l.Voice != VoiceFor(story, chars, l.Speaker).ID) {
+			return false
+		}
+	}
+	return true
+}
+
+// VoiceFor is the voice a line is read in: its speaker's, or the
+// narrator's for captions and unknown speakers.
+func VoiceFor(story *store.Story, chars []*store.Character, speaker string) pipeline.Voice {
+	if speaker != "" {
+		for _, c := range chars {
+			if strings.EqualFold(c.Name, speaker) {
+				return pipeline.CharacterVoice(c)
+			}
+		}
+	}
+	return pipeline.NarratorVoice(story)
+}
+
+func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error {
+	if p.ReadingImage != p.Image {
+		png, err := r.st.ReadImage(ctx, p.Image)
+		if err != nil {
+			return err
+		}
+		read, err := pipeline.ReadPage(ctx, r.ai, chars, p, png)
+		if err != nil {
+			return err
+		}
+		var lines []*store.PageLine
+		for _, l := range read {
+			pl := &store.PageLine{Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: store.LineBox(l.Box), Exact: l.Exact}
+			for _, w := range l.Words {
+				pl.Words = append(pl.Words, store.LineWord{Text: w.Text, Box: store.LineBox(w.Box)})
+			}
+			lines = append(lines, pl)
+		}
+		if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, lines); err != nil {
+			return err
+		}
+	}
+	lines, err := r.st.PageLines(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for _, l := range lines {
+		voice := VoiceFor(story, chars, l.Speaker)
+		if len(l.Words) == 0 || (l.Audio != "" && l.Voice == voice.ID) {
+			continue
+		}
+		wg.Add(1)
+		go func(l *store.PageLine) {
+			defer wg.Done()
+			if err := r.voiceLine(ctx, story.ID, l, voice.ID); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}(l)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return r.st.SetReadingError(ctx, p.ID, "")
+}
+
+// voiceLine synthesizes one line and times each lettered word.
+func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine, voice string) error {
+	lettered := make([]pipeline.LetterWord, len(l.Words))
+	for i, w := range l.Words {
+		lettered[i] = pipeline.LetterWord{Text: w.Text}
+	}
+	sp, err := r.Voice.Speak(ctx, pipeline.SpokenText(lettered), voice)
+	if err != nil {
+		return err
+	}
+	name, err := r.st.SaveAudio(ctx, storyID, sp.Ext, sp.Audio)
+	if err != nil {
+		return err
+	}
+	times := pipeline.AlignWords(len(l.Words), lettered, sp.Words)
+	words := append([]store.LineWord(nil), l.Words...)
+	for i := range words {
+		words[i].Start, words[i].End = times[i][0], times[i][1]
+	}
+	return r.st.SetLineAudio(ctx, l.ID, voice, name, words)
 }

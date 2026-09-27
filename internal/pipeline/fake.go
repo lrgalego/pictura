@@ -156,6 +156,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 		v = map[string]any{"pages": pages}
 	case "voices":
 		v = fakeCasting(user)
+	case "lettering":
+		v = fakeLettering(user)
 	case "page":
 		pages := breakdown(script, cast(script))
 		p := pages[0]
@@ -327,12 +329,13 @@ func draw(prompt, size string, page bool) []byte {
 				disc(img, cx, cy-ph/8, pw/8, ink)
 				fill(img, image.Rect(cx-pw/8, cy, cx+pw/8, y+ph-10), ink)
 				// speech bubble
-				bub := image.Rect(x+10, y+10, x+pw*2/3, y+ph/4)
+				bub := fakeBubbleRect(k)
 				fill(img, bub, color.RGBA{255, 255, 255, 255})
 				stroke(img, bub, ink, 3)
 				k++
 			}
 		}
+		letterFakePage(img, fakePanelsFromPrompt(prompt))
 	} else {
 		fill(img, image.Rect(0, 0, w, h), color.RGBA{255, 255, 255, 255})
 		stroke(img, image.Rect(8, 8, w-8, h-8), tint, 6)
