@@ -556,3 +556,40 @@ func TestReadToMeOnAPhone(t *testing.T) {
 		_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(dir + "/reader-phone.png")})
 	}
 }
+
+func TestPickAVoice(t *testing.T) {
+	page := newPage(t)
+	signup(t, page, "caster")
+	createStory(t, page, "The Lighthouse Keeper's Robot", "Storybook")
+
+	// Casting gave everyone a voice and the story a narrator.
+	must(t, expect.Locator(page.Locator(".voice-line--narrator")).ToContainText("Narrator: George"))
+	must(t, expect.Locator(page.Locator(".tile").First()).ToContainText("voice: "))
+
+	// Pick another voice for Mara from her page; hear one on the way.
+	openCharacter(t, page, "Mara")
+	before, err := page.Locator("#char-voice b").TextContent()
+	must(t, err)
+	must(t, page.Locator("#char-voice button:has-text('Change')").Click())
+	must(t, expect.Locator(page.Locator(".side-panel")).ToContainText("A voice for Mara"))
+	must(t, expect.Locator(page.Locator(".voice-row--current")).ToHaveCount(1))
+	must(t, page.Locator(".voice-row [data-listen]").Nth(3).Click())
+	must(t, expect.Locator(page.Locator(".voice-row [data-listen].is-playing, .voice-row [data-listen].is-loading")).ToHaveCount(1))
+	row := page.Locator(".voice-row:not(.voice-row--current)").Last()
+	name, err := row.Locator("b").TextContent()
+	must(t, err)
+	must(t, row.Locator("button:has-text('Use')").Click())
+	must(t, expect.Locator(page.Locator(".side-panel")).ToHaveCount(0))
+	must(t, expect.Locator(page.Locator("#char-voice b")).ToHaveText("Voice: "+name))
+	if before == "Voice: "+name {
+		t.Fatal("the voice did not change")
+	}
+	must(t, expect.Locator(page.Locator(".toast")).ToContainText("now speaks as "+name))
+
+	// The narrator is changed from the cast.
+	must(t, page.Locator(".rail__back").Click())
+	must(t, page.Locator("#narrator-voice button:has-text('Change')").Click())
+	must(t, expect.Locator(page.Locator(".side-panel")).ToContainText("A voice for the narrator"))
+	must(t, page.Locator(".voice-row:has-text('Bill') button:has-text('Use')").Click())
+	must(t, expect.Locator(page.Locator(".voice-line--narrator")).ToContainText("Narrator: Bill"))
+}

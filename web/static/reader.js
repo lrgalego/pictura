@@ -51,7 +51,7 @@
     var need = data.pages.some(function (p) { return p.status === 'stale' || p.status === 'error'; });
     if (!need) return;
     prepared = true;
-    fetch(root.dataset.prepare, { method: 'POST', credentials: 'same-origin', headers: { 'HX-Request': 'true' } })
+    fetch(root.dataset.prepare, { method: 'POST', credentials: 'same-origin' })
       .then(function () { schedule(800); });
   }
 

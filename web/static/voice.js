@@ -50,10 +50,7 @@
   });
 
   // A panel that closes or re-renders takes its button with it: stop.
-  document.addEventListener('htmx:beforeSwap', function () {
-    if (current && !document.body.contains(current)) stop();
-  });
-  document.addEventListener('htmx:afterSwap', function () {
+  document.addEventListener('htmx:after:swap', function () {
     if (current && !document.body.contains(current)) stop();
   });
 })();

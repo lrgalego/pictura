@@ -210,7 +210,7 @@ func VoicePanel(p VoicePicker) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" hx-swap=\"outerHTML\"><input type=\"hidden\" name=\"voice\" value=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" hx-swap=\"outerMorph\"><input type=\"hidden\" name=\"voice\" value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -617,7 +617,7 @@ func narratorLine(cv CharactersView) templ.Component {
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: cv.Job.Active(), Attrs: templ.Attributes{"hx-post": base(st) + "/voices/cast", "hx-target": "#step-panel", "hx-swap": "outerHTML", "title": "Some characters have stand-in voices. The editor picks a voice for each one from their description."}}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var28), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: cv.Job.Active(), Attrs: templ.Attributes{"hx-post": base(st) + "/voices/cast", "hx-target": "#step-panel", "hx-swap": "outerMorph", "title": "Some characters have stand-in voices. The editor picks a voice for each one from their description."}}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var28), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
