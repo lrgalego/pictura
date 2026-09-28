@@ -38,6 +38,10 @@ address = "46.224.151.146"
 # address is recorded automatically by `shipyard provision` (hetzner).
 port = 22
 user = "root"
+# This project's own deploy key, read through the service account for every
+# ssh hop, so deploys never wait on an unlocked desktop SSH agent. The shared
+# "shipyard" key stays on the box for break-glass access.
+key = "op://pictura/pictura-deploy/private key"
 
 [machine.hetzner]
 location    = "nbg1"
