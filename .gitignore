@@ -1,3 +1,6 @@
+# --- shipyard ----------------------------------------------------------------
+# Managed by `shipyard sync`. Add this project's own entries below the end
+# marker: sync rewrites only what sits between the markers.
 # Live data and local state — the VM is authoritative, never the checkout.
 data/
 bin/
@@ -14,3 +17,4 @@ result
 result-*
 # Claude Code local state (settings, worktrees)
 .claude/
+# --- end shipyard ------------------------------------------------------------

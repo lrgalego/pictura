@@ -1,7 +1,7 @@
 #!/bin/sh
 # Two guards, one per protected ref:
 #
-#   main   — runs the tests and the coverage gate before the push is allowed.
+#   main   — runs the gate (`make gate`) before the push is allowed.
 #            This is where quality is enforced: once a commit is on
 #            origin/main it is deployable by definition, so it must be green
 #            *before* it lands there, not discovered red at release time.
@@ -62,15 +62,12 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
 			continue
 		fi
 
-		echo "pre-push: running tests before updating main..." >&2
-		if ! make test >/dev/null 2>&1; then
-			printf '\n  refusing to push to main: tests fail. Run `make test`.\n\n' >&2
-			status=1
-			continue
-		fi
-		echo "pre-push: checking coverage..." >&2
-		if ! make cover-check >/dev/null 2>&1; then
-			printf '\n  refusing to push to main: coverage below threshold. Run `make cover-check`.\n\n' >&2
+		# `make gate` is the whole gate: generated code, build and vet, the
+		# tests and coverage floor, then the project's own gate-local checks
+		# from Makefile.local. One definition, runnable by hand.
+		echo "pre-push: running the gate (make gate) before updating main..." >&2
+		if ! make gate >/dev/null 2>&1; then
+			printf '\n  refusing to push to main: the gate is red. Run `make gate` to see why.\n\n' >&2
 			status=1
 		fi
 		continue

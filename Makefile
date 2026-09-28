@@ -14,8 +14,10 @@ TEMPL ?= $(GO) tool templ
 PORT ?= 8080
 COVER_PROFILE ?= coverage.out
 COVER_MIN ?= 85
+# [gate] race in shipyard.toml.
+TEST_FLAGS ?=
 
-.PHONY: all setup doctor deploy deploy-status ssh test cover-check build clean generate run-server
+.PHONY: all setup doctor deploy deploy-status ssh test cover-check gate gate-local vet build clean generate check-generated run-server
 
 # Installs Nix if absent; everything else lives in the flake. Safe to re-run.
 setup:
@@ -36,7 +38,26 @@ ssh:
 	@$(SHIPYARD) ssh '$(ARGS)'
 
 test:
-	$(GO) test ./...
+	$(GO) test $(TEST_FLAGS) ./...
+
+# The gate every push to main must pass (the pre-push hook runs it), in the
+# order a failure is cheapest to report: generated code is current, everything
+# builds and vets, the tests pass above the coverage floor, and then the
+# project's own checks.
+gate: check-generated vet cover-check
+	@$(MAKE) --no-print-directory gate-local
+
+vet:
+	$(GO) build ./...
+	$(GO) vet ./...
+
+# Project-specific checks join the gate from Makefile.local, which sync never
+# touches — a double-colon rule, so every definition runs and none is needed:
+#
+#     gate-local::
+#     	./scripts/my-extra-check.sh
+gate-local::
+	@:
 
 # Coverage with -coverpkg=./... so tests in external _test packages credit the
 # code they exercise; deduped because every test binary re-reports every
@@ -46,7 +67,7 @@ COVER_FLAGS = -coverpkg=./... -count=1
 COVER_FILTER = awk 'NR==1 && /^mode:/ {print; next} {key=$$1; if ($$NF+0 >= max[key]+0) { max[key]=$$NF; line[key]=$$0 }} END {for (k in line) print line[k]}' $(COVER_PROFILE) | grep -v -e '_templ\.go:' -e '/cmd/server/main.go' > $(COVER_PROFILE).tmp && mv $(COVER_PROFILE).tmp $(COVER_PROFILE)
 
 cover-check:
-	$(GO) test ./... $(COVER_FLAGS) -coverprofile=$(COVER_PROFILE)
+	$(GO) test $(TEST_FLAGS) ./... $(COVER_FLAGS) -coverprofile=$(COVER_PROFILE)
 	@$(COVER_FILTER)
 	@TOTAL=`$(GO) tool cover -func=$(COVER_PROFILE) | awk '/^total:/ {print $$3}' | tr -d '%'`; \
 	if [ -z "$$TOTAL" ]; then \
@@ -60,6 +81,14 @@ cover-check:
 
 generate:
 	$(TEMPL) generate
+
+# Generated views are committed, so they must match their sources: regenerate
+# and fail if anything moved (or appeared) — commit the result.
+check-generated: generate
+	@if ! git diff --quiet -- '*_templ.go' || [ -n "$$(git ls-files --others --exclude-standard -- '*_templ.go')" ]; then \
+		printf '\n  generated *_templ.go files were stale — regenerated now; commit them.\n\n'; \
+		exit 1; \
+	fi
 
 build: generate
 	$(GO) build -o bin/server ./cmd/server
