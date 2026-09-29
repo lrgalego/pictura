@@ -28,6 +28,48 @@ const ReadingVersion = 2
 // own ("[gulps]" came back silent and is not offered).
 var VocalTags = []string{"yawns", "laughs", "giggles", "sighs", "gasps", "growls", "snores", "screams", "cries"}
 
+// vocalSounds describes each vocal for the sound-effects model, the
+// fallback when the voice returns nothing for a line that is only a tag.
+var vocalSounds = map[string]string{
+	"yawns":   "a big sleepy human yawn",
+	"laughs":  "a short hearty human laugh",
+	"giggles": "a light playful giggle",
+	"sighs":   "a long tired human sigh",
+	"gasps":   "a short surprised gasp",
+	"growls":  "a low grumpy growl",
+	"snores":  "soft, slow human snoring",
+	"screams": "a short cartoon scream",
+	"cries":   "a few seconds of sobbing",
+}
+
+// VocalSound is how a vocal is described to the sound-effects model.
+func VocalSound(tag string) string {
+	if s, ok := vocalSounds[tag]; ok {
+		return s
+	}
+	return "a short human vocal sound: " + tag
+}
+
+// OnlyVocal reports whether every word of a line is performed as a vocal,
+// and which one comes first.
+func OnlyVocal(words []LetterWord) (string, bool) {
+	if len(words) == 0 {
+		return "", false
+	}
+	for _, w := range words {
+		if w.Tag == "" {
+			return "", false
+		}
+	}
+	return words[0].Tag, true
+}
+
+// VocalSeconds is how long a vocal-only line is made when it falls back to
+// the sound-effects model: a moment per word, within the effect limits.
+func VocalSeconds(words int) float64 {
+	return clampF(0.8*float64(words), 1.0, MaxEffectSeconds)
+}
+
 // Effect durations are asked for explicitly: the model bills per second.
 const (
 	MinEffectSeconds     = 0.5
@@ -211,6 +253,35 @@ func isVocalTag(t string) bool {
 // is only tags gets a trailing ellipsis, which eleven_v3 needs to perform
 // a tag on its own.
 func Script(words []LetterWord) (string, [][]int) {
+	return ScriptWith("", words)
+}
+
+// ScriptWith is Script with a delivery: how the whole line is said, as an
+// audio tag in front ("[whispers] ..."). The tag stands for no word.
+func ScriptWith(delivery string, words []LetterWord) (string, [][]int) {
+	text, owners := script(words)
+	if d := cleanDelivery(delivery); d != "" && text != "" {
+		return "[" + d + "] " + text, append([][]int{{}}, owners...)
+	}
+	return text, owners
+}
+
+// cleanDelivery keeps a delivery to a short plain tag.
+func cleanDelivery(d string) string {
+	d = strings.ToLower(strings.TrimSpace(strings.Trim(d, "[] ")))
+	d = strings.Map(func(r rune) rune {
+		if r == '[' || r == ']' || r == '\n' {
+			return -1
+		}
+		return r
+	}, d)
+	if len(d) > 40 {
+		d = d[:40]
+	}
+	return d
+}
+
+func script(words []LetterWord) (string, [][]int) {
 	speech := make([]LetterWord, 0, len(words))
 	for _, w := range words {
 		if w.Tag == "" {
@@ -276,4 +347,58 @@ func AlignTokens(n int, owners [][]int, text string, spoken []WordTiming) [][2]f
 		}
 	}
 	return out
+}
+
+// ---------- one line, adjusted by the writer ----------
+
+// LineAdjustment is a new plan for one line: its parts, and how the spoken
+// parts are said.
+type LineAdjustment struct {
+	Parts    []Part `json:"parts"`
+	Delivery string `json:"delivery"`
+}
+
+var adjustLineSchema = obj(map[string]any{
+	"parts":    soundsSchema["properties"].(map[string]any)["lines"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["parts"],
+	"delivery": str("How the spoken words are said, as one short eleven_v3 audio tag without brackets — e.g. whispers, excited, sleepily, shouting, sarcastic, sad — or empty for a natural read"),
+}, "parts", "delivery")
+
+// AdjustLine re-plans one line from the writer's direction. The current
+// plan is given so an unrelated part is kept.
+func AdjustLine(ctx context.Context, ai AI, story *store.Story, page *store.Page, line PlanLine, current []Part, delivery, direction string) (*LineAdjustment, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Story: %s. World: %s\nPage %d: %s\n\n", story.Title, story.World, page.Number, page.Summary)
+	who := line.Speaker
+	if who == "" {
+		who = "narrator"
+	}
+	fmt.Fprintf(&b, "THE LINE (%s, %s):", line.Kind, who)
+	for j, w := range line.Words {
+		fmt.Fprintf(&b, " [%d]%s", j, w)
+	}
+	b.WriteString("\n\nHOW IT IS PLAYED NOW:\n")
+	for _, p := range current {
+		switch p.Kind {
+		case "effect":
+			fmt.Fprintf(&b, "- words %d-%d: sound effect %q, %.1fs\n", p.From, p.To, p.Sound, p.Seconds)
+		case "vocal":
+			fmt.Fprintf(&b, "- words %d-%d: the speaker performs [%s]\n", p.From, p.To, p.Tag)
+		default:
+			fmt.Fprintf(&b, "- words %d-%d: spoken\n", p.From, p.To)
+		}
+	}
+	if delivery != "" {
+		fmt.Fprintf(&b, "Spoken words are said: %s\n", delivery)
+	}
+	fmt.Fprintf(&b, "\nTHE WRITER'S DIRECTION:\n%s\n\nReturn the line's new plan following the direction: parts covering every word in order (speech, vocal with a tag, or effect with a concrete sound description and a length of 0.5 to 4 seconds), and a delivery for the spoken words. Change only what the direction asks for.", direction)
+	var out LineAdjustment
+	if err := ai.ChatJSON(ctx, soundPersona, b.String(), nil, "line", adjustLineSchema, &out); err != nil {
+		return nil, err
+	}
+	parts, ok := validParts(out.Parts, len(line.Words))
+	if !ok {
+		return nil, fmt.Errorf("the new plan for this line did not cover its words; try the direction again in other words")
+	}
+	out.Parts, out.Delivery = parts, cleanDelivery(out.Delivery)
+	return &out, nil
 }

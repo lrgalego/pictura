@@ -31,6 +31,7 @@ type Runner struct {
 	storyRunning map[int64]bool
 	charRunning  map[int64]bool
 	charCount    map[int64]int // running character jobs per story
+	pagesBusy    map[int64]int // read-aloud work queued or running per page
 	imgSem       chan struct{}
 	wg           sync.WaitGroup
 }
@@ -47,7 +48,7 @@ func New(st *store.Store, ai pipeline.AI, images int) *Runner {
 	if images < 1 {
 		images = 1
 	}
-	return &Runner{Voice: pipeline.FakeVoice{}, st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, imgSem: make(chan struct{}, images)}
+	return &Runner{Voice: pipeline.FakeVoice{}, st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, pagesBusy: map[int64]int{}, imgSem: make(chan struct{}, images)}
 }
 
 // Wait blocks until every queued and running job has finished (tests, shutdown).
@@ -987,7 +988,8 @@ func (r *Runner) Narrate(storyID int64) error {
 
 // NarrationReady reports whether a drawn page can be read aloud as it is:
 // read from its current art with sound design done, every spoken line
-// voiced in its speaker's voice and every sound effect made.
+// voiced in its speaker's voice and every sound effect made — or, for a
+// line that could not be made, its failure recorded (it is skipped).
 func NarrationReady(story *store.Story, chars []*store.Character, p *store.Page, lines []*store.PageLine) bool {
 	if p.ImageStatus != store.ImageReady || p.Image == "" || p.ReadingImage != p.Image || p.ReadingVersion < pipeline.ReadingVersion {
 		return false
@@ -995,6 +997,9 @@ func NarrationReady(story *store.Story, chars []*store.Character, p *store.Page,
 	for _, l := range lines {
 		if len(l.Words) == 0 {
 			continue
+		}
+		if l.Error != "" {
+			continue // failed and settled: the page plays without it
 		}
 		if l.Audio == "" || (l.Sound == "" && l.Voice != VoiceFor(story, chars, l.Speaker).ID) {
 			return false
@@ -1059,10 +1064,8 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 		return err
 	}
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
 	for _, l := range lines {
-		if len(l.Words) == 0 {
+		if len(l.Words) == 0 || l.Error != "" {
 			continue
 		}
 		var work func() error
@@ -1082,21 +1085,18 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 			work = func() error { return r.voiceLine(ctx, story.ID, l, voice.ID) }
 		}
 		wg.Add(1)
+		id := l.ID
 		go func() {
 			defer wg.Done()
+			// A line that cannot be made is recorded on the line; the rest
+			// of the page is kept and plays without it.
 			if err := work(); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
+				log.Printf("page %d line %d: %v", p.ID, id, err)
+				_ = r.st.SetLineError(ctx, id, err.Error())
 			}
 		}()
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return firstErr
-	}
 	return r.st.SetReadingError(ctx, p.ID, "")
 }
 
@@ -1164,6 +1164,14 @@ func splitLine(l *store.PageLine, parts []pipeline.Part) []*store.PageLine {
 	return out
 }
 
+func indexes(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
 func joinWords(ws []store.LineWord) string {
 	t := make([]string, len(ws))
 	for i, w := range ws {
@@ -1180,8 +1188,22 @@ func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine
 	for i, w := range l.Words {
 		lettered[i] = pipeline.LetterWord{Text: w.Text, Tag: w.Tag}
 	}
-	text, owners := pipeline.Script(lettered)
+	text, owners := pipeline.ScriptWith(l.Delivery, lettered)
 	sp, err := r.Voice.Speak(ctx, text, voice)
+	if tag, only := pipeline.OnlyVocal(lettered); err != nil && only {
+		// eleven_v3 sometimes returns nothing for a line that is only an
+		// audio tag ("[snores]..."), retries included. Make the sound with
+		// the sound-effects model instead; the line counts as voiced.
+		secs := pipeline.VocalSeconds(len(l.Words))
+		fx, ferr := r.Voice.Sound(ctx, pipeline.VocalSound(tag), secs)
+		if ferr != nil {
+			return fmt.Errorf("%w (and the sound-effect fallback: %v)", err, ferr)
+		}
+		log.Printf("voice line %d: %v; used a sound effect for [%s] instead", l.ID, err, tag)
+		sp, err = &pipeline.Speech{Audio: fx.Audio, Ext: fx.Ext, Words: []pipeline.WordTiming{{Text: text, Start: 0, End: secs}}}, nil
+		owners = [][]int{indexes(len(l.Words))}
+		text = "vocal"
+	}
 	if err != nil {
 		return err
 	}
@@ -1213,4 +1235,195 @@ func (r *Runner) soundLine(ctx context.Context, storyID int64, l *store.PageLine
 		words[i].Start, words[i].End = 0, l.Seconds
 	}
 	return r.st.SetLineAudio(ctx, l.ID, effectVoice, name, words)
+}
+
+// ---------- one page, one line ----------
+
+// PagesBusy reports whether read-aloud work for a page is queued or running.
+func (r *Runner) PageBusy(pageID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pagesBusy[pageID] > 0
+}
+
+func (r *Runner) busyPage(pageID int64, d int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pagesBusy[pageID] += d; r.pagesBusy[pageID] <= 0 {
+		delete(r.pagesBusy, pageID)
+	}
+}
+
+// pageJob queues read-aloud work on one page, marked busy until it ends.
+func (r *Runner) pageJob(storyID, pageID int64, kind, message string, fn func(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error) error {
+	r.busyPage(pageID, 1)
+	err := r.start(storyID, kind, message, 0, func(ctx context.Context, report reporter) error {
+		defer r.busyPage(pageID, -1)
+		story, chars, err := r.readyCast(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		p, err := r.st.Page(ctx, pageID)
+		if err != nil || p.StoryID != storyID {
+			return store.ErrNotFound
+		}
+		if p.ImageStatus != store.ImageReady || p.Image == "" {
+			return fmt.Errorf("page %d is not drawn yet", p.Number)
+		}
+		return fn(ctx, story, chars, p)
+	})
+	if err != nil {
+		r.busyPage(pageID, -1)
+	}
+	return err
+}
+
+// readyCast loads a story and its cast, casting voices first if needed.
+func (r *Runner) readyCast(ctx context.Context, storyID int64) (*store.Story, []*store.Character, error) {
+	chars, err := r.st.Characters(ctx, storyID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pipeline.Uncast(chars) {
+		r.castVoices(ctx, storyID)
+		if chars, err = r.st.Characters(ctx, storyID); err != nil {
+			return nil, nil, err
+		}
+	}
+	story, err := r.st.Story(ctx, storyID)
+	return story, chars, err
+}
+
+// NarratePage gets one page ready to be read aloud again: its failed lines
+// are made due and everything missing is made; what worked is kept.
+func (r *Runner) NarratePage(storyID, pageID int64) error {
+	return r.pageJob(storyID, pageID, "narrate-page", "Getting the page ready to be read aloud…", func(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error {
+		if err := r.st.ClearLineErrors(ctx, p.ID); err != nil {
+			return err
+		}
+		if err := r.narratePage(ctx, story, chars, p); err != nil {
+			_ = r.st.SetReadingError(ctx, p.ID, err.Error())
+			return fmt.Errorf("page %d could not be read aloud: %w", p.Number, err)
+		}
+		return nil
+	})
+}
+
+// RetryLine makes one line's clip again, as it is planned.
+func (r *Runner) RetryLine(storyID, lineID int64) error {
+	l, err := r.st.PageLine(context.Background(), lineID)
+	if err != nil {
+		return err
+	}
+	return r.pageJob(storyID, l.PageID, "line", "Making the line again…", func(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error {
+		l, err := r.st.PageLine(ctx, lineID)
+		if err != nil {
+			return err
+		}
+		return r.makeLine(ctx, story, chars, l)
+	})
+}
+
+// makeLine voices or sounds one line, recording a failure on the line.
+func (r *Runner) makeLine(ctx context.Context, story *store.Story, chars []*store.Character, l *store.PageLine) error {
+	var err error
+	if l.Sound != "" {
+		err = r.soundLine(ctx, story.ID, l)
+	} else {
+		err = r.voiceLine(ctx, story.ID, l, VoiceFor(story, chars, l.Speaker).ID)
+	}
+	if err != nil {
+		_ = r.st.SetLineError(ctx, l.ID, err.Error())
+		return fmt.Errorf("the line could not be made: %w", err)
+	}
+	return nil
+}
+
+// AdjustLine re-plans one line from the writer's direction (speech, a vocal
+// the speaker performs, or a sound effect, and how it is said) and makes
+// just that line again. Its neighbours are untouched.
+func (r *Runner) AdjustLine(storyID, lineID int64, direction string) error {
+	l, err := r.st.PageLine(context.Background(), lineID)
+	if err != nil {
+		return err
+	}
+	return r.pageJob(storyID, l.PageID, "line", "Adjusting the line…", func(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error {
+		lines, err := r.st.PageLines(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		at := -1
+		for i, x := range lines {
+			if x.ID == lineID {
+				at = i
+			}
+		}
+		if at < 0 {
+			return store.ErrNotFound
+		}
+		old := lines[at]
+		plan := pipeline.PlanLine{Kind: old.Kind, Speaker: old.Speaker}
+		for _, w := range old.Words {
+			plan.Words = append(plan.Words, w.Text)
+		}
+		adj, err := pipeline.AdjustLine(ctx, r.ai, story, p, plan, currentParts(old), old.Delivery, direction)
+		if err != nil {
+			return err
+		}
+		fresh := buildRows(old, adj.Parts, adj.Delivery, direction)
+		all := append(append(append([]*store.PageLine{}, lines[:at]...), fresh...), lines[at+1:]...)
+		if err := r.st.ReplacePageLines(ctx, p.ID, p.ReadingImage, p.ReadingVersion, all); err != nil {
+			return err
+		}
+		var failed error
+		for _, row := range fresh {
+			if err := r.makeLine(ctx, story, chars, row); err != nil && failed == nil {
+				failed = err
+			}
+		}
+		return failed
+	})
+}
+
+// currentParts describes how a line is played now, for the adjustment.
+func currentParts(l *store.PageLine) []pipeline.Part {
+	n := len(l.Words)
+	if n == 0 {
+		return nil
+	}
+	if l.Sound != "" {
+		return []pipeline.Part{{From: 0, To: n - 1, Kind: "effect", Sound: l.Sound, Seconds: l.Seconds}}
+	}
+	var out []pipeline.Part
+	for i, w := range l.Words {
+		kind := "speech"
+		if w.Tag != "" {
+			kind = "vocal"
+		}
+		if k := len(out) - 1; k >= 0 && out[k].Kind == kind && out[k].Tag == w.Tag {
+			out[k].To = i
+			continue
+		}
+		out = append(out, pipeline.Part{From: i, To: i, Kind: kind, Tag: w.Tag})
+	}
+	return out
+}
+
+// buildRows turns an adjusted plan into fresh rows (no clips yet): a voiced
+// row per run of speech and vocals, a row per sound effect.
+func buildRows(l *store.PageLine, parts []pipeline.Part, delivery, direction string) []*store.PageLine {
+	base := *l
+	base.Words = nil
+	for _, w := range l.Words {
+		base.Words = append(base.Words, store.LineWord{Text: w.Text, Box: w.Box})
+	}
+	base.Audio, base.Voice, base.Error, base.Sound, base.Seconds, base.Delivery = "", "", "", "", 0, ""
+	rows := splitLine(&base, parts) // base is already a fresh copy
+	for _, row := range rows {
+		row.Direction = direction
+		if row.Sound == "" {
+			row.Delivery = delivery
+		}
+	}
+	return rows
 }

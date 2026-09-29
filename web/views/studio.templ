@@ -1,0 +1,389 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/store"
+)
+
+// PageSound is a page's read-aloud state as its card on the Comic step
+// shows it.
+type PageSound struct {
+	Read   bool   // read from its current art
+	Ready  bool   // plays as it is
+	Busy   bool   // work queued or running on it
+	Lines  int    // lines with words
+	Failed int    // lines whose clip could not be made
+	Error  string // why the page itself could not be read aloud
+}
+
+// Trouble is a problem worth showing in the simple view.
+func (s PageSound) Trouble() bool { return !s.Busy && (s.Error != "" || s.Failed > 0) }
+
+// StudioView is the sound studio for one page: every line, how it plays,
+// and the controls to remake or direct it.
+type StudioView struct {
+	Story      *store.Story
+	Page       *store.Page
+	Pages      []*store.Page
+	Characters []*store.Character
+	Lines      []*store.PageLine
+	Job        *store.Job
+	Busy       bool
+	Sound      PageSound
+	Script     string // versioned studio.js
+}
+
+func studioURL(st *store.Story, p *store.Page) string {
+	return fmt.Sprintf("%s/studio/%d", base(st), p.ID)
+}
+
+func lineURL(st *store.Story, l *store.PageLine, action string) string {
+	return fmt.Sprintf("%s/studio/lines/%d/%s", base(st), l.ID, action)
+}
+
+// cueKind is what a line is, for colour and wording.
+func cueKind(l *store.PageLine) string {
+	switch {
+	case l.Sound != "":
+		return "effect"
+	case lineHasTag(l):
+		return "vocal"
+	}
+	return "speech"
+}
+
+func lineHasTag(l *store.PageLine) bool {
+	for _, w := range l.Words {
+		if w.Tag != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func lineTags(l *store.PageLine) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range l.Words {
+		if w.Tag != "" && !seen[w.Tag] {
+			seen[w.Tag] = true
+			out = append(out, w.Tag)
+		}
+	}
+	return out
+}
+
+// cueWho says who plays a line: the character and their voice, the
+// narrator, or nobody for a sound effect.
+func (v StudioView) cueWho(l *store.PageLine) string {
+	if l.Sound != "" {
+		return fmt.Sprintf("%.1f s", l.Seconds)
+	}
+	name := l.Speaker
+	if name == "" {
+		name = "Narrator"
+		return name + " · " + pipeline.NarratorVoice(v.Story).Name
+	}
+	for _, c := range v.Characters {
+		if strings.EqualFold(c.Name, l.Speaker) {
+			return name + " · " + pipeline.CharacterVoice(c).Name
+		}
+	}
+	return name
+}
+
+// cueState is a line's status.
+func (v StudioView) cueState(l *store.PageLine) string {
+	switch {
+	case l.Error != "":
+		return "failed"
+	case l.Audio != "":
+		return "ready"
+	case v.Busy:
+		return "working"
+	}
+	return "pending"
+}
+
+// suggestions are one-tap directions that fit the line.
+func suggestions(l *store.PageLine) []string {
+	switch cueKind(l) {
+	case "effect":
+		return []string{"Make it longer", "Softer and further away", "Bigger, more cartoonish", "Say it as a word instead"}
+	case "vocal":
+		return []string{"Say it as a word instead", "Make it a sound effect", "Bigger and louder", "Softer, sleepier"}
+	}
+	return []string{"Whisper it", "Say it excitedly", "Slower and sleepy", "Make it a sound effect"}
+}
+
+func (v StudioView) counts() (ready, failed, total int) {
+	for _, l := range v.Lines {
+		if len(l.Words) == 0 {
+			continue
+		}
+		total++
+		switch {
+		case l.Error != "":
+			failed++
+		case l.Audio != "":
+			ready++
+		}
+	}
+	return
+}
+
+func pct(f float64) string { return strconv.FormatFloat(f*100, 'f', 2, 64) + "%" }
+
+func markerStyle(b store.LineBox) string {
+	return fmt.Sprintf("left:%s;top:%s", pct(b.X1), pct(b.Y1))
+}
+
+func outlineStyle(b store.LineBox) string {
+	return fmt.Sprintf("left:%s;top:%s;width:%s;height:%s", pct(b.X1), pct(b.Y1), pct(b.X2-b.X1), pct(b.Y2-b.Y1))
+}
+
+// Studio is the full page.
+templ Studio(v StudioView) {
+	<div class="studio">
+		@StudioPanel(v)
+	</div>
+	<script src={ v.Script } defer></script>
+}
+
+// StudioPanel is the polled region: it refreshes itself while work runs.
+templ StudioPanel(v StudioView) {
+	if v.Busy {
+		<div id="studio-panel" class="studio__panel" hx-get={ studioURL(v.Story, v.Page) + "/panel" } hx-trigger="every 2s" hx-target="this" hx-swap="outerMorph">
+			@studioBody(v)
+		</div>
+	} else {
+		<div id="studio-panel" class="studio__panel">
+			@studioBody(v)
+		</div>
+	}
+}
+
+templ studioBody(v StudioView) {
+	{{ ready, failed, total := v.counts() }}
+	<header class="studio__head">
+		<a class="studio__back" href={ base(v.Story) + "/book" }>
+			@components.IconChevronLeft()
+			Back to the comic
+		</a>
+		<div class="studio__title">
+			<span class="studio__eyebrow">Sound studio</span>
+			<h1>{ fmt.Sprintf("Page %d", v.Page.Number) }<span class="studio__subtitle">{ v.Page.Title }</span></h1>
+		</div>
+		<nav class="studio__pages" aria-label="Pages">
+			for _, p := range v.Pages {
+				<a href={ studioURL(v.Story, p) } class={ "studio__pill", templ.KV("studio__pill--current", p.ID == v.Page.ID) } aria-current={ ariaCurrent(p.ID == v.Page.ID) }>{ strconv.Itoa(p.Number) }</a>
+			}
+		</nav>
+	</header>
+	if v.Job != nil && v.Job.Active() && v.Busy {
+		<div class="studio__working" role="status">
+			@components.Spinner("sm", "")
+			<span>{ v.Job.Message }</span>
+		</div>
+	}
+	if v.Page.ReadingError != "" && !v.Busy {
+		@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "This page couldn't be read aloud"}) {
+			<p class="job__hint">{ v.Page.ReadingError }</p>
+		}
+	}
+	<div class="studio__bar">
+		<span class="studio__count studio__count--ready">{ fmt.Sprintf("%d of %d ready", ready, total) }</span>
+		if failed > 0 {
+			<span class="studio__count studio__count--failed">{ plural(failed, "line failed", "lines failed") }</span>
+		}
+		<span class="toolbar__spacer"></span>
+		if failed > 0 || (!v.Sound.Ready && !v.Busy) {
+			@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: v.Busy, Attrs: templ.Attributes{"hx-post": fmt.Sprintf("%s/read/pages/%d/retry", base(v.Story), v.Page.ID), "hx-target": "#studio-panel", "hx-swap": "outerMorph"}}) {
+				@components.IconRefreshCw()
+				if failed > 0 {
+					Retry failed lines
+				} else {
+					Prepare this page
+				}
+			}
+		}
+		@components.LinkButton(components.LinkButtonProps{Href: fmt.Sprintf("%s/read?page=%d", base(v.Story), v.Page.Number), Class: "read-cta", Size: components.SizeSm}) {
+			<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"></path></svg>
+			Play this page
+		}
+	</div>
+	<div class="studio__grid">
+		<figure class="panel studio__art">
+			<div class="studio__sheet">
+				<img src={ "/media/" + v.Page.Image } alt={ fmt.Sprintf("Page %d", v.Page.Number) }/>
+				for i, l := range v.Lines {
+					if len(l.Words) > 0 {
+						<span class={ "studio__outline", "cue--" + cueKind(l) } style={ outlineStyle(l.Box) } data-outline={ strconv.FormatInt(l.ID, 10) }></span>
+						<a href={ templ.SafeURL(fmt.Sprintf("#cue-%d", l.ID)) } class={ "studio__marker", "cue--" + cueKind(l), "cue--" + v.cueState(l) } style={ markerStyle(l.Box) } data-marker={ strconv.FormatInt(l.ID, 10) } aria-label={ fmt.Sprintf("Line %d", i+1) }>{ strconv.Itoa(i + 1) }</a>
+					}
+				}
+			</div>
+		</figure>
+		if len(v.Lines) == 0 {
+			<div class="studio__empty panel panel--soft">
+				<b>Nothing to hear yet</b>
+				<span class="note">This page hasn't been read aloud. Prepare it and every balloon shows up here, ready to tune.</span>
+			</div>
+		} else {
+			<ol class="studio__cues">
+				for i, l := range v.Lines {
+					if len(l.Words) > 0 {
+						@cue(v, l, i+1)
+					}
+				}
+			</ol>
+		}
+	</div>
+}
+
+func ariaCurrent(on bool) string {
+	if on {
+		return "page"
+	}
+	return "false"
+}
+
+templ cue(v StudioView, l *store.PageLine, n int) {
+	{{ kind := cueKind(l) }}
+	{{ state := v.cueState(l) }}
+	<li class={ "cue", "cue--" + kind, "cue--" + state } id={ fmt.Sprintf("cue-%d", l.ID) } data-cue={ strconv.FormatInt(l.ID, 10) }>
+		<span class="cue__num" aria-hidden="true">{ strconv.Itoa(n) }</span>
+		<div class="cue__main">
+			<div class="cue__meta">
+				<span class="cue__kind">
+					switch kind {
+						case "effect":
+							💥 Sound effect
+						case "vocal":
+							🎭 Performed
+						default:
+							💬 Spoken
+					}
+				</span>
+				<span class="cue__who">{ v.cueWho(l) }</span>
+				for _, t := range lineTags(l) {
+					<span class="cue__chip">{ "[" + t + "]" }</span>
+				}
+				if l.Delivery != "" {
+					<span class="cue__chip">{ "[" + l.Delivery + "]" }</span>
+				}
+			</div>
+			<p class="cue__text">
+				for _, w := range l.Words {
+					if w.Tag != "" {
+						<span class="cue__tagged" title={ "performed as [" + w.Tag + "]" }>{ w.Text }</span>
+					} else {
+						{ w.Text }
+					}
+					{ " " }
+				}
+			</p>
+			if l.Sound != "" {
+				<p class="cue__sound">{ "“" + l.Sound + "”" }</p>
+			}
+			if l.Direction != "" {
+				<p class="cue__note">{ "Your note: " + l.Direction }</p>
+			}
+			if state == "failed" {
+				<details class="cue__error">
+					<summary>Couldn't make this one — why?</summary>
+					<code>{ l.Error }</code>
+				</details>
+			}
+			<div class="cue__actions">
+				@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: v.Busy, Attrs: templ.Attributes{"hx-post": lineURL(v.Story, l, "retry"), "hx-target": "#studio-panel", "hx-swap": "outerMorph"}}) {
+					@components.IconRefreshCw()
+					Remake
+				}
+				<details class="cue__direct" data-direct>
+					<summary class="btn btn--ghost btn--sm">🎬 Direct…</summary>
+					<form class="cue__form" hx-post={ lineURL(v.Story, l, "adjust") } hx-target="#studio-panel" hx-swap="outerMorph">
+						<label class="cue__label" for={ fmt.Sprintf("dir-%d", l.ID) }>Tell the sound designer what to change</label>
+						<textarea id={ fmt.Sprintf("dir-%d", l.ID) } name="direction" rows="2" class="textarea" placeholder="e.g. a tiny frog far away, then a big one close by" required>{ l.Direction }</textarea>
+						<div class="cue__suggest">
+							for _, s := range suggestions(l) {
+								<button type="button" class="cue__idea" data-suggest={ s }>{ s }</button>
+							}
+						</div>
+						@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeSm, Disabled: v.Busy}) {
+							Remake with this
+						}
+					</form>
+				</details>
+			</div>
+		</div>
+		<div class="cue__side">
+			switch state {
+				case "ready":
+					@listenButton("/media/"+l.Audio, fmt.Sprintf("Play line %d", n), "")
+				case "failed":
+					<span class="cue__status cue__status--failed" title="This line is skipped when the page is read">
+						@components.IconAlertTriangle()
+					</span>
+				case "working":
+					<span class="cue__status">
+						@components.Spinner("sm", "")
+					</span>
+				default:
+					<span class="cue__status cue__status--pending" title="Not made yet">…</span>
+			}
+		</div>
+	</li>
+}
+
+// pageSoundStrip sits under a page card on the Comic step: quiet unless
+// something needs the writer, plus the studio link in studio mode.
+templ pageSoundStrip(st *store.Story, p *store.Page, s PageSound, studio bool, busy bool) {
+	if p.ImageStatus == store.ImageReady {
+		if s.Busy {
+			<div class="leaf__sound">
+				@components.Spinner("sm", "")
+				<span>Getting the voices ready…</span>
+			</div>
+		} else if s.Trouble() {
+			<div class="leaf__sound leaf__sound--trouble">
+				<span>
+					if s.Error != "" {
+						🔇 This page couldn't be read aloud
+					} else {
+						{ fmt.Sprintf("🔇 %s couldn't be voiced", plural(s.Failed, "line", "lines")) }
+					}
+				</span>
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy, Attrs: templ.Attributes{"hx-post": fmt.Sprintf("%s/read/pages/%d/retry", base(st), p.ID), "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
+					Try again
+				}
+			</div>
+		}
+		if studio {
+			<a class="leaf__studio" href={ studioURL(st, p) }>
+				🎚 Sound studio
+				if s.Read && s.Lines > 0 {
+					<span class="note">{ plural(s.Lines, "line", "lines") }</span>
+				}
+			</a>
+		}
+	}
+}
+
+// studioSwitch turns the sound studio on or off for this browser.
+templ studioSwitch(st *store.Story, on bool) {
+	<form class="studio-switch" hx-post="/prefs/studio" hx-target="#step-panel" hx-swap="outerMorph" hx-trigger="change">
+		<input type="hidden" name="story" value={ strconv.FormatInt(st.ID, 10) }/>
+		@components.Label(components.LabelProps{}) {
+			@components.Switch(components.SwitchProps{Name: "studio", Checked: on, Attrs: templ.Attributes{"aria-describedby": "studio-hint"}})
+			<span>Sound studio</span>
+		}
+		<span id="studio-hint" class="visually-hidden">Shows every line of each page with its sound, to remake or direct</span>
+	</form>
+}

@@ -68,12 +68,12 @@ func TestReadToMe(t *testing.T) {
 			t.Fatalf("%s must be owner-only: %d", u, resp.StatusCode)
 		}
 	}
-	if resp, _ := other.post(base+"/read/prepare", nil, true); resp.StatusCode != http.StatusNotFound {
+	if resp, _ := other.post(base+"/read/prepare", nil, false); resp.StatusCode != http.StatusNotFound {
 		t.Fatal("prepare must be owner-only")
 	}
 
 	// Nothing to prepare: prepare is a no-op.
-	resp, body = e.post(base+"/read/prepare", nil, true)
+	resp, body = e.post(base+"/read/prepare", nil, false)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"started":false`) {
 		t.Fatalf("prepare when ready: %d %s", resp.StatusCode, body)
 	}
@@ -96,7 +96,7 @@ func TestReadToMe(t *testing.T) {
 		t.Fatalf("changing a voice should make pages stale: %+v", d.Pages)
 	}
 	e.hold()
-	resp, body = e.post(base+"/read/prepare", nil, true)
+	resp, body = e.post(base+"/read/prepare", nil, false)
 	if !strings.Contains(body, `"started":true`) {
 		t.Fatalf("prepare: %s", body)
 	}
@@ -122,7 +122,7 @@ func TestReadToMe(t *testing.T) {
 	if d.Pages[0].Status != readError || d.Pages[0].Error != "voice down" {
 		t.Fatalf("error page: %+v", d.Pages[0])
 	}
-	if _, body := e.post(base+"/read/prepare", nil, true); !strings.Contains(body, `"started":true`) {
+	if _, body := e.post(base+"/read/prepare", nil, false); !strings.Contains(body, `"started":true`) {
 		t.Fatalf("retry: %s", body)
 	}
 	e.waitIdle()
@@ -150,7 +150,7 @@ func TestReadAStoryWithoutArt(t *testing.T) {
 			t.Fatalf("an undrawn page: %+v", p)
 		}
 	}
-	if _, body := e.post(base+"/read/prepare", nil, true); !strings.Contains(body, `"started":false`) {
+	if _, body := e.post(base+"/read/prepare", nil, false); !strings.Contains(body, `"started":false`) {
 		t.Fatalf("nothing to prepare without art: %s", body)
 	}
 }
@@ -190,5 +190,15 @@ func TestReadMarksSoundEffects(t *testing.T) {
 	_, body := e.get(base + "/read")
 	if !strings.Contains(body, "reader.js") {
 		t.Fatal("reader page")
+	}
+}
+
+func TestPrepareFromTheComicStep(t *testing.T) {
+	e := newEnv(t)
+	e.signup("again")
+	base, _ := e.finished(t)
+	resp, body := e.post(base+"/read/prepare", nil, true)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="step-panel"`) || !strings.Contains(body, "Trying again") {
+		t.Fatalf("htmx prepare answers with the Comic step: %d", resp.StatusCode)
 	}
 }

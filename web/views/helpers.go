@@ -147,12 +147,20 @@ func jobFailure(j *store.Job) (title, hint string) {
 		title = "Drawing the pages failed"
 	case "render-page":
 		title = "Redrawing the page failed"
+	case "narrate":
+		title = "Getting the book ready to read aloud failed"
+	case "narrate-page":
+		title = "Getting the page ready to read aloud failed"
+	case "line":
+		title = "Remaking the line failed"
 	default:
 		title = "The last step failed"
 	}
 	switch e := strings.ToLower(j.Error); {
 	case strings.Contains(e, "server restart"):
 		hint = "Pictura restarted while this was running. Nothing is lost; start it again."
+	case strings.Contains(e, "elevenlabs"), strings.Contains(e, "voice service"):
+		hint = "The voice service didn't answer properly — usually a hiccup on their side. Everything that worked is kept; trying again only makes what's missing."
 	case strings.Contains(e, "meta api"), strings.Contains(e, "fake ai"), strings.Contains(e, "deadline"), strings.Contains(e, "timeout"):
 		hint = "The writing and drawing models didn't answer properly. That's usually a hiccup on their side; try again in a moment."
 	default:
@@ -182,6 +190,8 @@ func jobRetry(st *store.Story, j *store.Job, step int) (retryAction, bool) {
 		return retryAction{URL: base(st) + "/pages/adjust", Label: "Adjust the pages again", Dialog: true}, true
 	case step == store.StepBook && (j.Kind == "render" || j.Kind == "render-page"):
 		return retryAction{URL: base(st) + "/book/draw", Label: "Draw the missing pages"}, true
+	case step == store.StepBook && (j.Kind == "narrate" || j.Kind == "narrate-page"):
+		return retryAction{URL: base(st) + "/read/prepare", Label: "Try reading aloud again"}, true
 	}
 	return retryAction{}, false
 }

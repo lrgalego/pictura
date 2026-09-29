@@ -3,6 +3,7 @@ package elevenlabs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
 
 // server answers every request with a recorded body and remembers what it
@@ -43,12 +46,13 @@ func server(t *testing.T, status int, fixture string) (*httptest.Server, *http.R
 func client(s *httptest.Server) *Client {
 	c := New("sk_test")
 	c.BaseURL = s.URL
+	c.Backoff = []time.Duration{0, 0} // retries, without the waiting
 	return c
 }
 
 func TestNewDefaults(t *testing.T) {
 	c := New("k")
-	if c.BaseURL != DefaultBaseURL || c.Model != DefaultModel || c.Format != DefaultFormat || c.HTTP == nil || cap(c.sem) != 2 {
+	if c.BaseURL != DefaultBaseURL || c.Model != DefaultModel || c.Format != DefaultFormat || c.HTTP == nil || cap(c.sem) != 2 || len(c.Backoff) != 2 {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
@@ -227,5 +231,68 @@ func TestSound(t *testing.T) {
 	cancel()
 	if _, err := c.Sound(ctx, "x", 1); err != context.Canceled {
 		t.Fatalf("cancelled: %v", err)
+	}
+}
+
+// Transient failures are retried; real refusals are not.
+func TestRetries(t *testing.T) {
+	var calls atomic.Int32
+	answers := []func(w http.ResponseWriter){}
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(calls.Add(1)) - 1
+		if n < len(answers) {
+			answers[n](w)
+			return
+		}
+		_, _ = io.WriteString(w, `{"audio_base64":"SUQz"}`)
+	}))
+	defer s.Close()
+	c := client(s)
+	status := func(code int) func(w http.ResponseWriter) {
+		return func(w http.ResponseWriter) { w.WriteHeader(code); _, _ = io.WriteString(w, `{"detail":"busy"}`) }
+	}
+	empty := func(w http.ResponseWriter) { _, _ = io.WriteString(w, `{"audio_base64":""}`) }
+
+	for _, tc := range []struct {
+		name  string
+		seq   []func(w http.ResponseWriter)
+		calls int32
+		ok    bool
+	}{
+		{"server errors then fine", []func(w http.ResponseWriter){status(503), status(500)}, 3, true},
+		{"rate limited then fine", []func(w http.ResponseWriter){status(429)}, 2, true},
+		{"empty audio then fine", []func(w http.ResponseWriter){empty, empty}, 3, true},
+		{"empty every time", []func(w http.ResponseWriter){empty, empty, empty}, 3, false},
+		{"a refusal is final", []func(w http.ResponseWriter){status(400)}, 1, false},
+		{"missing permission is final", []func(w http.ResponseWriter){status(401)}, 1, false},
+	} {
+		calls.Store(0)
+		answers = tc.seq
+		_, err := c.Speak(context.Background(), "hi", "v")
+		if (err == nil) != tc.ok || calls.Load() != tc.calls {
+			t.Errorf("%s: err=%v after %d calls, want ok=%v after %d", tc.name, err, calls.Load(), tc.ok, tc.calls)
+		}
+	}
+	// Sounds retry the same way.
+	calls.Store(0)
+	answers = []func(w http.ResponseWriter){status(502)}
+	if _, err := c.Sound(context.Background(), "boom", 1); err != nil || calls.Load() != 2 {
+		t.Fatalf("sound retry: %v after %d calls", err, calls.Load())
+	}
+	// An empty body 200 on a sound is retried, then an error.
+	calls.Store(0)
+	answers = []func(w http.ResponseWriter){func(w http.ResponseWriter) {}, func(w http.ResponseWriter) {}, func(w http.ResponseWriter) {}}
+	if _, err := c.Sound(context.Background(), "boom", 1); err == nil || !errors.Is(err, pipeline.ErrNoAudio) {
+		t.Fatalf("empty sound: %v", err)
+	}
+	// Giving up while waiting to retry.
+	slow := client(s)
+	slow.Backoff = []time.Duration{time.Hour}
+	calls.Store(0)
+	answers = []func(w http.ResponseWriter){status(503)}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := slow.Speak(ctx, "hi", "v"); err != context.DeadlineExceeded {
+		t.Fatalf("cancelled wait: %v", err)
 	}
 }

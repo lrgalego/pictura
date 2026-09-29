@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -15,6 +16,9 @@ type Speaker interface {
 	Speak(ctx context.Context, text, voiceID string) (*Speech, error)
 	Sounder
 }
+
+// ErrNoAudio is a synthesis that succeeded but carried no sound.
+var ErrNoAudio = errors.New("the voice service returned no audio")
 
 // Speech is one synthesized line.
 type Speech struct {

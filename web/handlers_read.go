@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/lrgalego/htmx-ds/components"
+	"github.com/lrgalego/htmx-ds/layout"
+
 	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
@@ -41,6 +44,7 @@ type readPageData struct {
 	Status string     `json:"status"`
 	Error  string     `json:"error,omitempty"`
 	Lines  []readLine `json:"lines"`
+	Failed int        `json:"failed,omitempty"` // lines skipped because they could not be made
 }
 
 type readData struct {
@@ -84,7 +88,7 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 			d.Status = readUndrawn
 		case jobs.NarrationReady(st, chars, p, lines[p.ID]):
 			d.Status = readReady
-		case preparing:
+		case preparing || s.jobs.PageBusy(p.ID):
 			d.Status = readPreparing
 		case p.ReadingError != "":
 			d.Status, d.Error = readError, p.ReadingError
@@ -97,6 +101,10 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 		if d.Status == readReady {
 			for _, l := range lines[p.ID] {
 				if len(l.Words) == 0 {
+					continue
+				}
+				if l.Audio == "" {
+					d.Failed++ // could not be made: the reader skips it
 					continue
 				}
 				d.Lines = append(d.Lines, readLine{ID: l.ID, Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: l.Box, Audio: "/media/" + l.Audio, Words: l.Words, Effect: l.Sound})
@@ -157,6 +165,11 @@ func (s *server) readPrepare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		started = true
+	}
+	if layout.IsFragment(r) {
+		// From the Comic step's retry button.
+		s.answerBook(w, r, st, toast(components.ToastSuccess, "Trying again", "What already worked is kept; only what's missing is made."))
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"started": started})

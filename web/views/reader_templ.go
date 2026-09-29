@@ -65,59 +65,72 @@ func Reader(v ReaderView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\"><header class=\"reader__bar\"><a class=\"reader__back\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-retry=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var4 templ.SafeURL
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(base(v.Story) + "/book")
+		var templ_7745c5c3_Var4 string
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(base(v.Story) + "/read/pages/")
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 14, Col: 167}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"><header class=\"reader__bar\"><a class=\"reader__back\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var5 templ.SafeURL
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinURLErrs(base(v.Story) + "/book")
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 16, Col: 57}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 18l-6-6 6-6\"></path></svg> <span>Back to the comic</span></a><h1 class=\"reader__title\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(titleOr(v.Story))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 20, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</h1><span class=\"reader__pageno\" aria-live=\"polite\"></span></header><div class=\"reader__stage\"><div class=\"reader__sheet\"><img class=\"reader__img\" alt=\"\"><div class=\"reader__overlay\"><div class=\"reader__spot\" hidden></div><div class=\"reader__hl\" hidden></div><div class=\"reader__hotspots\"></div></div></div><div class=\"reader__cover\"><button type=\"button\" class=\"reader__big\" data-act=\"start\" aria-label=\"Read to me\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg></button><div class=\"reader__cover-title\">Read to me</div><div class=\"reader__status\" aria-live=\"polite\">Opening the book…</div></div><div class=\"reader__end\" hidden><div class=\"reader__end-title\">The End</div><div class=\"reader__end-actions\"><button type=\"button\" class=\"reader__pill reader__pill--pop\" data-act=\"again\">Read it again</button> <a class=\"reader__pill\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 18l-6-6 6-6\"></path></svg> <span>Back to the comic</span></a><h1 class=\"reader__title\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var6 templ.SafeURL
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(base(v.Story) + "/book")
+		var templ_7745c5c3_Var6 string
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(titleOr(v.Story))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 43, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 20, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\">Back to the comic</a></div></div><div class=\"reader__wait\" hidden><span class=\"reader__spinner\" aria-hidden=\"true\"></span> <span class=\"reader__wait-msg\"></span></div></div><div class=\"reader__who\" aria-live=\"polite\"></div><nav class=\"reader__controls\" aria-label=\"Reading controls\"><button type=\"button\" class=\"reader__ctl\" data-act=\"prev-page\" aria-label=\"Previous page\" title=\"Previous page (↑)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 6l-6 6 6 6M19 6l-6 6 6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"prev\" aria-label=\"Previous line\" title=\"Previous line (←)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 6l-6 6 6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl reader__ctl--play\" data-act=\"play\" aria-label=\"Play\" title=\"Play / pause (space)\"><svg class=\"i-play\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path class=\"fill\" d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg> <svg class=\"i-pause\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect class=\"fill\" x=\"6\" y=\"5\" width=\"4\" height=\"14\" rx=\"1\"></rect><rect class=\"fill\" x=\"14\" y=\"5\" width=\"4\" height=\"14\" rx=\"1\"></rect></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"next\" aria-label=\"Next line\" title=\"Next line (→)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 6l6 6-6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"next-page\" aria-label=\"Next page\" title=\"Next page (↓)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 6l6 6-6 6M13 6l6 6-6 6\"></path></svg></button> <span class=\"reader__sep\" aria-hidden=\"true\"></span> <button type=\"button\" class=\"reader__pill\" data-act=\"speed\" aria-label=\"Reading speed\" title=\"Reading speed\">1×</button> <button type=\"button\" class=\"reader__pill\" data-act=\"turn\" aria-pressed=\"true\" title=\"Turn the pages by itself\">Auto-turn</button> <button type=\"button\" class=\"reader__pill\" data-act=\"zoom\" aria-pressed=\"false\" title=\"Follow the words up close\">Zoom</button></nav><noscript><p class=\"note\">Reading aloud needs JavaScript.</p></noscript></div><script src=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</h1><span class=\"reader__pageno\" aria-live=\"polite\"></span></header><div class=\"reader__stage\"><div class=\"reader__sheet\"><img class=\"reader__img\" alt=\"\"><div class=\"reader__overlay\"><div class=\"reader__spot\" hidden></div><div class=\"reader__hl\" hidden></div><div class=\"reader__hotspots\"></div></div></div><div class=\"reader__cover\"><button type=\"button\" class=\"reader__big\" data-act=\"start\" aria-label=\"Read to me\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg></button><div class=\"reader__cover-title\">Read to me</div><div class=\"reader__status\" aria-live=\"polite\">Opening the book…</div></div><div class=\"reader__end\" hidden><div class=\"reader__end-title\">The End</div><div class=\"reader__end-actions\"><button type=\"button\" class=\"reader__pill reader__pill--pop\" data-act=\"again\">Read it again</button> <a class=\"reader__pill\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.Script)
+		var templ_7745c5c3_Var7 templ.SafeURL
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(base(v.Story) + "/book")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 76, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 43, Col: 59}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" defer></script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\">Back to the comic</a></div></div><div class=\"reader__wait\" hidden><span class=\"reader__spinner\" aria-hidden=\"true\"></span> <span class=\"reader__wait-msg\"></span> <button type=\"button\" class=\"reader__pill reader__pill--pop\" data-act=\"retry-page\" hidden>Try this page again</button></div></div><div class=\"reader__who\" aria-live=\"polite\"></div><nav class=\"reader__controls\" aria-label=\"Reading controls\"><button type=\"button\" class=\"reader__ctl\" data-act=\"prev-page\" aria-label=\"Previous page\" title=\"Previous page (↑)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 6l-6 6 6 6M19 6l-6 6 6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"prev\" aria-label=\"Previous line\" title=\"Previous line (←)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 6l-6 6 6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl reader__ctl--play\" data-act=\"play\" aria-label=\"Play\" title=\"Play / pause (space)\"><svg class=\"i-play\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path class=\"fill\" d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg> <svg class=\"i-pause\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect class=\"fill\" x=\"6\" y=\"5\" width=\"4\" height=\"14\" rx=\"1\"></rect><rect class=\"fill\" x=\"14\" y=\"5\" width=\"4\" height=\"14\" rx=\"1\"></rect></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"next\" aria-label=\"Next line\" title=\"Next line (→)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 6l6 6-6 6\"></path></svg></button> <button type=\"button\" class=\"reader__ctl\" data-act=\"next-page\" aria-label=\"Next page\" title=\"Next page (↓)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 6l6 6-6 6M13 6l6 6-6 6\"></path></svg></button> <span class=\"reader__sep\" aria-hidden=\"true\"></span> <button type=\"button\" class=\"reader__pill\" data-act=\"speed\" aria-label=\"Reading speed\" title=\"Reading speed\">1×</button> <button type=\"button\" class=\"reader__pill\" data-act=\"turn\" aria-pressed=\"true\" title=\"Turn the pages by itself\">Auto-turn</button> <button type=\"button\" class=\"reader__pill\" data-act=\"zoom\" aria-pressed=\"false\" title=\"Follow the words up close\">Zoom</button></nav><noscript><p class=\"note\">Reading aloud needs JavaScript.</p></noscript></div><script src=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.Script)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 77, Col: 23}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" defer></script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

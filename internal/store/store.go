@@ -194,7 +194,15 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 	if err := s.addColumn("page_lines", "sound", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("page_lines", "seconds", "REAL NOT NULL DEFAULT 0")
+	if err := s.addColumn("page_lines", "seconds", "REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	for _, col := range []string{"error", "delivery", "direction"} {
+		if err := s.addColumn("page_lines", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -1262,14 +1270,22 @@ type PageLine struct {
 	// Seconds long, rather than something said.
 	Sound   string
 	Seconds float64
+	// Delivery is how a spoken line is said, as an eleven_v3 audio tag
+	// ("whispers", "excited"); empty is the voice's own read.
+	Delivery string
+	// Direction is the writer's last note for this line, kept to show it.
+	Direction string
+	// Error is why the clip could not be made. A failed line is settled —
+	// the page plays without it — until someone retries or adjusts it.
+	Error string
 }
 
-const lineCols = `id, page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds`
+const lineCols = `id, page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds, delivery, direction, error`
 
 func scanLine(row scanner) (*PageLine, error) {
 	var l PageLine
 	var box, words string
-	if err := row.Scan(&l.ID, &l.PageID, &l.Seq, &l.Kind, &l.Speaker, &l.Text, &box, &words, &l.Exact, &l.Voice, &l.Audio, &l.Sound, &l.Seconds); err != nil {
+	if err := row.Scan(&l.ID, &l.PageID, &l.Seq, &l.Kind, &l.Speaker, &l.Text, &box, &words, &l.Exact, &l.Voice, &l.Audio, &l.Sound, &l.Seconds, &l.Delivery, &l.Direction, &l.Error); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(box), &l.Box)
@@ -1336,8 +1352,8 @@ func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string
 	for i, l := range lines {
 		box, _ := json.Marshal(l.Box)
 		words, _ := json.Marshal(orWords(l.Words))
-		res, err := tx.ExecContext(ctx, `INSERT INTO page_lines (page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-			pageID, i, l.Kind, l.Speaker, l.Text, string(box), string(words), l.Exact, l.Voice, l.Audio, l.Sound, l.Seconds)
+		res, err := tx.ExecContext(ctx, `INSERT INTO page_lines (page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds, delivery, direction, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			pageID, i, l.Kind, l.Speaker, l.Text, string(box), string(words), l.Exact, l.Voice, l.Audio, l.Sound, l.Seconds, l.Delivery, l.Direction, l.Error)
 		if err != nil {
 			return err
 		}
@@ -1351,11 +1367,32 @@ func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string
 }
 
 // SetLineAudio records a line's clip, the voice it was made with and the
-// words with their timings.
+// words with their timings, and clears any earlier failure.
 func (s *Store) SetLineAudio(ctx context.Context, lineID int64, voice, audio string, words []LineWord) error {
 	b, _ := json.Marshal(orWords(words))
-	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET voice = ?, audio = ?, words_json = ? WHERE id = ?`, voice, audio, string(b), lineID)
+	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET voice = ?, audio = ?, words_json = ?, error = '' WHERE id = ?`, voice, audio, string(b), lineID)
 	return err
+}
+
+// SetLineError records why a line's clip could not be made.
+func (s *Store) SetLineError(ctx context.Context, lineID int64, msg string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET error = ? WHERE id = ?`, msg, lineID)
+	return err
+}
+
+// ClearLineErrors makes a page's failed lines due again (a retry).
+func (s *Store) ClearLineErrors(ctx context.Context, pageID int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET error = '' WHERE page_id = ?`, pageID)
+	return err
+}
+
+// PageLine loads one line.
+func (s *Store) PageLine(ctx context.Context, id int64) (*PageLine, error) {
+	l, err := scanLine(s.db.QueryRowContext(ctx, `SELECT `+lineCols+` FROM page_lines WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return l, err
 }
 
 // SetReadingError records why a page could not be read aloud.

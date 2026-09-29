@@ -986,7 +986,15 @@ func (s *server) pagesView(r *http.Request, st *store.Story) (views.PagesView, e
 		return views.PagesView{}, err
 	}
 	chars, _ := s.st.Characters(r.Context(), st.ID)
-	return views.PagesView{Story: st, Pages: pages, Characters: chars, Job: job}, nil
+	v := views.PagesView{Story: st, Pages: pages, Characters: chars, Job: job, Studio: studioOn(r), Sound: map[int64]views.PageSound{}}
+	lines, err := s.st.StoryLines(r.Context(), st.ID)
+	if err != nil {
+		return v, err
+	}
+	for _, p := range pages {
+		v.Sound[p.ID] = s.pageSound(st, chars, p, lines[p.ID])
+	}
+	return v, nil
 }
 
 func (s *server) pagesPage(w http.ResponseWriter, r *http.Request) {

@@ -11,7 +11,7 @@ type ReaderView struct {
 
 // Reader is the stage: the page, the highlight over it, and the controls.
 templ Reader(v ReaderView) {
-	<div class="reader" id="reader" data-src={ base(v.Story) + "/read.json" } data-prepare={ base(v.Story) + "/read/prepare" }>
+	<div class="reader" id="reader" data-src={ base(v.Story) + "/read.json" } data-prepare={ base(v.Story) + "/read/prepare" } data-retry={ base(v.Story) + "/read/pages/" }>
 		<header class="reader__bar">
 			<a class="reader__back" href={ base(v.Story) + "/book" }>
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
@@ -46,6 +46,7 @@ templ Reader(v ReaderView) {
 			<div class="reader__wait" hidden>
 				<span class="reader__spinner" aria-hidden="true"></span>
 				<span class="reader__wait-msg"></span>
+				<button type="button" class="reader__pill reader__pill--pop" data-act="retry-page" hidden>Try this page again</button>
 			</div>
 		</div>
 		<div class="reader__who" aria-live="polite"></div>

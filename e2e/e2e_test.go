@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -592,4 +593,63 @@ func TestPickAVoice(t *testing.T) {
 	must(t, expect.Locator(page.Locator(".side-panel")).ToContainText("A voice for the narrator"))
 	must(t, page.Locator(".voice-row:has-text('Bill') button:has-text('Use')").Click())
 	must(t, expect.Locator(page.Locator(".voice-line--narrator")).ToContainText("Narrator: Bill"))
+}
+
+func TestSoundStudioFlow(t *testing.T) {
+	page := newPage(t)
+	drawnComic(t, page, "studio")
+	shots := os.Getenv("E2E_SHOTS")
+	shot := func(name string) {
+		if shots != "" {
+			_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(shots + "/" + name + ".png"), FullPage: playwright.Bool(true)})
+		}
+	}
+	// Narration is prepared after drawing; the studio is off by default.
+	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0, playwright.LocatorAssertionsToHaveCountOptions{Timeout: playwright.Float(30000)}))
+	must(t, expect.Locator(page.Locator(".leaf__studio")).ToHaveCount(0))
+	must(t, page.Locator(".studio-switch .label").Click())
+	must(t, expect.Locator(page.Locator(".leaf__studio").First()).ToBeVisible())
+	shot("book-studio-on")
+
+	// Into the studio of page one: a cue card per line, markers on the art.
+	must(t, page.Locator(".leaf__studio").First().Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/studio/\d+$`)))
+	must(t, expect.Locator(page.Locator(".cue").First()).ToBeVisible())
+	cues, _ := page.Locator(".cue").Count()
+	markers, _ := page.Locator(".studio__marker").Count()
+	if cues == 0 || cues != markers {
+		t.Fatalf("%d cues, %d markers", cues, markers)
+	}
+	// Hovering a cue lights its balloon on the page.
+	must(t, page.Locator(".cue").First().Hover())
+	must(t, expect.Locator(page.Locator(".studio__outline.is-lit")).ToHaveCount(1))
+	shot("studio")
+
+	// Direct a line with a suggestion: it becomes a sound effect.
+	must(t, page.Locator(".cue__direct > summary").First().Click())
+	must(t, page.Locator(".cue__idea:has-text('Make it a sound effect')").First().Click())
+	must(t, expect.Locator(page.Locator(".cue__direct[open] textarea")).ToHaveValue("Make it a sound effect"))
+	shot("studio-direct")
+	must(t, page.Locator(".cue__direct[open] button[type=submit]").Click())
+	must(t, expect.Locator(page.Locator(".cue").First()).ToContainText("Sound effect", playwright.LocatorAssertionsToContainTextOptions{Timeout: playwright.Float(20000)}))
+	must(t, expect.Locator(page.Locator(".cue").First()).ToContainText("Your note: Make it a sound effect"))
+	shot("studio-directed")
+
+	// Simple mode with a line that failed: a plain Try again on the card.
+	must(t, page.Locator(".studio__back").Click())
+	must(t, page.Locator(".studio-switch .label").Click())
+	must(t, expect.Locator(page.Locator(".leaf__studio")).ToHaveCount(0))
+	u := page.URL()
+	var storyID int64
+	fmt.Sscanf(u[strings.Index(u, "/stories/")+len("/stories/"):], "%d", &storyID)
+	pages, _ := db.Pages(context.Background(), storyID)
+	lines, _ := db.PageLines(context.Background(), pages[0].ID)
+	_ = db.SetLineAudio(context.Background(), lines[1].ID, "", "", lines[1].Words)
+	_ = db.SetLineError(context.Background(), lines[1].ID, "elevenlabs: the voice service returned no audio")
+	_, err := page.Reload()
+	must(t, err)
+	must(t, expect.Locator(page.Locator(".leaf__sound--trouble")).ToContainText("1 line couldn't be voiced"))
+	shot("book-trouble")
+	must(t, page.Locator(".leaf__sound--trouble button").Click())
+	must(t, expect.Locator(page.Locator(".leaf__sound--trouble")).ToHaveCount(0, playwright.LocatorAssertionsToHaveCountOptions{Timeout: playwright.Float(20000)}))
 }

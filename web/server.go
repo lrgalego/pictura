@@ -130,6 +130,12 @@ func Router(d Deps) http.Handler {
 	mux.Handle("GET /stories/{id}/read", auth(s.readPage))
 	mux.Handle("GET /stories/{id}/read.json", auth(s.readData))
 	mux.Handle("POST /stories/{id}/read/prepare", auth(s.readPrepare))
+	mux.Handle("POST /stories/{id}/read/pages/{pid}/retry", auth(s.retryPage))
+	mux.Handle("GET /stories/{id}/studio/{pid}", auth(s.studioPage))
+	mux.Handle("GET /stories/{id}/studio/{pid}/panel", auth(s.studioPanel))
+	mux.Handle("POST /stories/{id}/studio/lines/{lid}/retry", auth(s.retryLine))
+	mux.Handle("POST /stories/{id}/studio/lines/{lid}/adjust", auth(s.adjustLine))
+	mux.Handle("POST /prefs/studio", auth(s.toggleStudio))
 	mux.Handle("GET /stories/{id}/download.pdf", auth(s.downloadPDF))
 	mux.Handle("GET /stories/{id}/download.zip", auth(s.downloadZip))
 

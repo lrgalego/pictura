@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,8 +35,18 @@ type Client struct {
 	Model   string
 	Format  string
 	HTTP    *http.Client
+	// Backoff is the wait before each retry; its length is how many
+	// retries a transient failure gets.
+	Backoff []time.Duration
 	sem     chan struct{}
 }
+
+// transient marks a failure worth another attempt: the network, a rate
+// limit, a server error, or a 200 that carried no audio (eleven_v3 does
+// that now and then, e.g. for a line that is only "[snores]...").
+type transient struct{ error }
+
+func (t transient) Unwrap() error { return t.error }
 
 // New returns a client with the default model. ElevenLabs caps concurrent
 // requests per plan (two on the free tier), so calls beyond that wait here
@@ -47,6 +58,7 @@ func New(apiKey string) *Client {
 		Model:   DefaultModel,
 		Format:  DefaultFormat,
 		HTTP:    &http.Client{Timeout: 2 * time.Minute},
+		Backoff: []time.Duration{time.Second, 3 * time.Second},
 		sem:     make(chan struct{}, 2),
 	}
 }
@@ -75,6 +87,12 @@ type apiError struct {
 // from the alignment of the text as sent (not the normalized one, which
 // spells out numbers), so they line up with the words on the page.
 func (c *Client) Speak(ctx context.Context, text, voiceID string) (*pipeline.Speech, error) {
+	return c.retry(ctx, func() (*pipeline.Speech, error) { return c.speakOnce(ctx, text, voiceID) })
+}
+
+// retry runs one call, holding a concurrency slot, and repeats it after
+// each Backoff wait while it fails transiently.
+func (c *Client) retry(ctx context.Context, call func() (*pipeline.Speech, error)) (*pipeline.Speech, error) {
 	if c.sem != nil {
 		select {
 		case c.sem <- struct{}{}:
@@ -83,6 +101,30 @@ func (c *Client) Speak(ctx context.Context, text, voiceID string) (*pipeline.Spe
 			return nil, ctx.Err()
 		}
 	}
+	for attempt := 0; ; attempt++ {
+		sp, err := call()
+		var t transient
+		if err == nil || !errors.As(err, &t) || attempt >= len(c.Backoff) {
+			return sp, err
+		}
+		select {
+		case <-time.After(c.Backoff[attempt]):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// failure turns an HTTP answer into an error, marking the retryable ones.
+func failure(status int, body []byte) error {
+	err := fmt.Errorf("elevenlabs: %s", errorMessage(status, body))
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return transient{err}
+	}
+	return err
+}
+
+func (c *Client) speakOnce(ctx context.Context, text, voiceID string) (*pipeline.Speech, error) {
 	payload, err := json.Marshal(speechRequest{Text: text, ModelID: c.Model})
 	if err != nil {
 		return nil, err
@@ -96,23 +138,26 @@ func (c *Client) Speak(ctx context.Context, text, voiceID string) (*pipeline.Spe
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("elevenlabs: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, transient{fmt.Errorf("elevenlabs: %w", err)}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
-		return nil, err
+		return nil, transient{err}
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("elevenlabs: %s", errorMessage(resp.StatusCode, data))
+		return nil, failure(resp.StatusCode, data)
 	}
 	var out speechResponse
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("elevenlabs: unreadable response: %w", err)
+		return nil, transient{fmt.Errorf("elevenlabs: unreadable response: %w", err)}
 	}
 	audio, err := base64.StdEncoding.DecodeString(out.Audio)
 	if err != nil || len(audio) == 0 {
-		return nil, fmt.Errorf("elevenlabs: response carried no audio")
+		return nil, transient{fmt.Errorf("elevenlabs: %w", pipeline.ErrNoAudio)}
 	}
 	sp := &pipeline.Speech{Audio: audio, Ext: "mp3"}
 	if a := out.Alignment; a != nil {
@@ -134,14 +179,10 @@ const SoundModel = "eleven_text_to_sound_v2"
 // given: the model bills per second, and an unbounded "auto" length is
 // both dearer and harder to time the highlight against.
 func (c *Client) Sound(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
-	if c.sem != nil {
-		select {
-		case c.sem <- struct{}{}:
-			defer func() { <-c.sem }()
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+	return c.retry(ctx, func() (*pipeline.Speech, error) { return c.soundOnce(ctx, prompt, seconds) })
+}
+
+func (c *Client) soundOnce(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
 	// Adherence over creativity: the description names the sound wanted.
 	payload, err := json.Marshal(soundRequest{Text: prompt, DurationSeconds: seconds, PromptInfluence: 0.6})
 	if err != nil {
@@ -156,18 +197,21 @@ func (c *Client) Sound(ctx context.Context, prompt string, seconds float64) (*pi
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("elevenlabs: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, transient{fmt.Errorf("elevenlabs: %w", err)}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return nil, err
+		return nil, transient{err}
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("elevenlabs: %s", errorMessage(resp.StatusCode, data))
+		return nil, failure(resp.StatusCode, data)
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("elevenlabs: the sound effect came back empty")
+		return nil, transient{fmt.Errorf("elevenlabs: %w", pipeline.ErrNoAudio)}
 	}
 	return &pipeline.Speech{Audio: data, Ext: "mp3"}, nil
 }

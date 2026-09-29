@@ -75,7 +75,13 @@ a gasp: eleven_v3 audio tags in the speaker's own voice, since "Yaaawn" read
 literally comes out as "Yon!") and sound effects of the world (stomps,
 POOF!, explosions: ElevenLabs' sound-effects model, 0.5–4 s, billed per
 second). Each line is voiced once (ElevenLabs reports when every character is
-spoken) and kept with its clip; redrawing a page re-reads only that page,
+spoken) and kept with its clip; ElevenLabs calls are retried on transient
+failures, a line that is only a vocal falls back to the sound-effects model,
+and a line that still cannot be made is recorded on the line and skipped —
+the page still plays. The Comic step shows a "Try again" per page; the
+opt-in **Sound studio** (a switch on the Comic step) lists every line of a
+page with its audio, status and reason, to remake it or direct it in plain
+words ("make it a frog croak, longer", "she whispers this"); redrawing a page re-reads only that page,
 and changing a voice re-voices only that speaker's lines. The player
 (`web/static/reader.js`) moves the highlight from the audio clock.
 

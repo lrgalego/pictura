@@ -514,6 +514,8 @@ type PagesView struct {
 	Pages      []*store.Page
 	Characters []*store.Character
 	Job        *store.Job
+	Studio     bool                // the sound studio is on in this browser
+	Sound      map[int64]PageSound // per page: its read-aloud state
 }
 
 templ PagesStep(v PagesView) {
@@ -656,7 +658,7 @@ templ BookPanel(v PagesView) {
 		} else {
 			<div class="book-grid" data-motion-stagger="pop">
 				for _, p := range v.Pages {
-					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Active())
+					@leaf(v.Story, p, readyIndex(v.Pages)[p.ID], v.Job.Active(), v.Sound[p.ID], v.Studio)
 				}
 			</div>
 			<div class="toolbar toolbar--bottom">
@@ -675,6 +677,7 @@ templ bookToolbar(v PagesView) {
 		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
 		<span class="toolbar__spacer"></span>
 		if readyCount(v.Pages) > 0 {
+			@studioSwitch(v.Story, v.Studio)
 			@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/read", Class: "read-cta"}) {
 				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"></path></svg>
 				Read to me
@@ -704,7 +707,7 @@ templ bookToolbar(v PagesView) {
 // leaf is one drawn page. The art's id is the image name, so the morph
 // that delivers a redrawn page inserts it fresh and it pops in, rather
 // than quietly swapping the src of the old one.
-templ leaf(st *store.Story, p *store.Page, idx int, busy bool) {
+templ leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, studio bool) {
 	<article class="panel leaf" id={ fmt.Sprintf("leaf-%d", p.ID) }>
 		<div class="leaf__art">
 			switch p.ImageStatus {
@@ -741,6 +744,7 @@ templ leaf(st *store.Story, p *store.Page, idx int, busy bool) {
 				Redraw
 			}
 		</div>
+		@pageSoundStrip(st, p, sound, studio, busy)
 	</article>
 }
 

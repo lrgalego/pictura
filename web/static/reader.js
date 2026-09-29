@@ -13,7 +13,7 @@
   var img = $('.reader__img'), sheet = $('.reader__sheet'), stage = $('.reader__stage');
   var spot = $('.reader__spot'), hl = $('.reader__hl'), hotspots = $('.reader__hotspots');
   var cover = $('.reader__cover'), status = $('.reader__status'), end = $('.reader__end');
-  var wait = $('.reader__wait'), waitMsg = $('.reader__wait-msg');
+  var wait = $('.reader__wait'), waitMsg = $('.reader__wait-msg'), retryBtn = $('[data-act=retry-page]');
   var who = $('.reader__who'), pageNo = $('.reader__pageno');
   var playBtn = $('[data-act=play]'), speedBtn = $('[data-act=speed]');
   var turnBtn = $('[data-act=turn]'), zoomBtn = $('[data-act=zoom]');
@@ -98,7 +98,9 @@
   }
 
   function waitingText(p) {
-    if (p.status === 'error') return 'Page ' + p.number + ' could not be read aloud: ' + (p.error || 'unknown error') + '. Press play to try again.';
+    retryBtn.hidden = p.status !== 'error';
+    wait.classList.toggle('is-stuck', p.status === 'error');
+    if (p.status === 'error') return 'Page ' + p.number + ' couldn\'t be read aloud.';
     if (p.status === 'undrawn') return 'Page ' + p.number + ' is not drawn yet.';
     return 'Getting page ' + p.number + ' ready… ' + progress();
   }
@@ -278,8 +280,19 @@
   function showWait() {
     wait.hidden = false;
     waitMsg.textContent = waitingText(page());
-    if (page().status === 'stale' || page().status === 'error') prepare(true);
+    if (page().status === 'stale') prepare(true);
     schedule(1500);
+  }
+
+  // retryPage asks for this one page again; what worked on it is kept.
+  function retryPage() {
+    var p = page();
+    retryBtn.hidden = true;
+    wait.classList.remove('is-stuck');
+    p.status = 'preparing';
+    waitMsg.textContent = 'Trying page ' + p.number + ' again…';
+    fetch(root.dataset.retry + p.id + '/retry', { method: 'POST', credentials: 'same-origin' })
+      .then(function () { schedule(1500); });
   }
   function hideWait() { wait.hidden = true; }
 
@@ -321,6 +334,12 @@
     audio.play().catch(function () {});
     cover.hidden = true;
     var first = data ? data.pages.findIndex(function (p) { return p.status !== 'undrawn'; }) : 0;
+    // ?page=N (the sound studio's "Play this page") starts there.
+    var asked = parseInt(new URLSearchParams(location.search).get('page'), 10);
+    if (data && asked > 0) {
+      var at = data.pages.findIndex(function (p) { return p.number === asked; });
+      if (at >= 0) first = at;
+    }
     turnTo(Math.max(0, first), true);
   }
 
@@ -388,6 +407,7 @@
       case 'start': begin(); break;
       case 'play': toggle(); break;
       case 'again': again(); break;
+      case 'retry-page': wanted = true; retryPage(); break;
       case 'prev': lineStep(-1); break;
       case 'next': lineStep(1); break;
       case 'prev-page': if (!cover.hidden) break; end.hidden = true; turnTo(Math.max(0, pi - 1), wanted || playing); break;

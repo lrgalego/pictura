@@ -11,6 +11,8 @@ state_dir  = "/data"
 # mounted volume (the binary defaults to ./data, which is not writable in the
 # distroless image).
 server_args = ["--data", "/data"]
+# The SQLite file under state_dir, for `shipyard db snapshot`.
+db          = "pictura.db"
 # Memory ceiling for this container: required on a shared machine so one app
 # cannot starve its neighbours. Generous for a Go server holding a few
 # multi-megabyte PNGs while pages render.

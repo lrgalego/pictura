@@ -161,6 +161,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 		v = fakeLettering(user)
 	case "sounds":
 		v = fakeSounds(user)
+	case "line":
+		v = fakeAdjustLine(user)
 	case "page":
 		pages := breakdown(script, cast(script))
 		p := pages[0]
@@ -230,6 +232,23 @@ func fakeSounds(user string) map[string]any {
 		lines = append(lines, map[string]any{"line": n, "parts": parts})
 	}
 	return map[string]any{"lines": lines}
+}
+
+// fakeAdjustLine follows a direction naively: "effect"/"sound" in it makes
+// the whole line a sound effect, "whisper" a whispered read, anything else
+// plain speech.
+func fakeAdjustLine(user string) map[string]any {
+	n := len(fakeWordRe.FindAllString(strings.SplitN(after(user, "THE LINE"), "\n", 2)[0], -1))
+	dir := strings.ToLower(strings.SplitN(after(user, "THE WRITER'S DIRECTION:"), "\n", 2)[0])
+	part := map[string]any{"from": 0, "to": max(0, n-1), "kind": "speech", "tag": "", "sound": "", "seconds": 0}
+	delivery := ""
+	switch {
+	case strings.Contains(dir, "effect") || strings.Contains(dir, "sound"):
+		part["kind"], part["sound"], part["seconds"] = "effect", "a sound the writer asked for", 1.5
+	case strings.Contains(dir, "whisper"):
+		delivery = "whispers"
+	}
+	return map[string]any{"parts": []any{part}, "delivery": delivery}
 }
 
 func after(s, marker string) string {

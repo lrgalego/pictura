@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -884,40 +885,77 @@ func TestNarrateFailures(t *testing.T) {
 	voice := &countingVoice{fail: true}
 	e.r.Voice = voice
 	e.drawnBook()
-	// Drawing succeeded; the chained narration failed and says why, per page.
-	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobError || !strings.Contains(j.Error, "voice down") {
+	// Lines that cannot be made do not fail the book: each records why,
+	// the pages count as settled (they play without those lines).
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobDone {
 		t.Fatalf("narrate job: %+v", j)
 	}
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	lines, _ := e.st.StoryLines(e.ctx, e.sto.ID)
 	for _, p := range e.pages() {
-		if p.ImageStatus != store.ImageReady || p.ReadingError == "" || p.ReadingImage != p.Image {
+		if p.ReadingError != "" || !NarrationReady(sto, e.chars(), p, lines[p.ID]) {
 			t.Fatalf("page: %+v", p)
 		}
-	}
-	// The reading is kept; only the voicing is retried.
-	voice.fail = false
-	_ = e.r.Narrate(e.sto.ID)
-	e.mustDone("retry")
-	for _, p := range e.pages() {
-		if p.ReadingError != "" {
-			t.Fatalf("error not cleared: %+v", p)
+		for _, l := range lines[p.ID] {
+			if l.Audio != "" || !strings.Contains(l.Error, "voice down") {
+				t.Fatalf("line: %+v", l)
+			}
 		}
 	}
-	// A reading that fails is recorded too.
+	// Preparing again on its own does not spend on lines that failed.
+	calls := voice.total()
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("narrate again")
+	if voice.total() != calls {
+		t.Fatalf("failed lines were retried automatically: %d calls", voice.total()-calls)
+	}
+	// Retrying a page makes its failed lines again; the others stay failed.
+	voice.fail = false
+	p := e.pages()[0]
+	if err := e.r.NarratePage(e.sto.ID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.mustDone("retry page")
+	if e.r.PageBusy(p.ID) {
+		t.Fatal("the page should not stay busy")
+	}
+	lines, _ = e.st.StoryLines(e.ctx, e.sto.ID)
+	for _, l := range lines[p.ID] {
+		if l.Audio == "" || l.Error != "" {
+			t.Fatalf("retried line: %+v", l)
+		}
+	}
+	for _, l := range lines[e.pages()[1].ID] {
+		if l.Error == "" {
+			t.Fatal("other pages are not retried by a page retry")
+		}
+	}
+	// A reading that fails is a page failure, and fails the job.
 	e2 := newEnv(t)
 	e2.drawnBook()
-	p := e2.pages()[0]
-	_ = e2.r.RenderPage(e2.sto.ID, p.ID, "")
+	p2 := e2.pages()[0]
+	_ = e2.r.RenderPage(e2.sto.ID, p2.ID, "")
 	e2.mustDone("redraw")
 	e2.ai.failChat = true
 	_ = e2.r.Narrate(e2.sto.ID)
 	e2.mustFail("narrate", "chat down")
-	if got, _ := e2.st.Page(e2.ctx, p.ID); !strings.Contains(got.ReadingError, "chat down") {
+	if got, _ := e2.st.Page(e2.ctx, p2.ID); !strings.Contains(got.ReadingError, "chat down") {
 		t.Fatalf("reading error: %+v", got)
 	}
-	// No drawn pages: nothing to do.
+	_ = e2.r.NarratePage(e2.sto.ID, p2.ID)
+	e2.mustFail("page retry", "could not be read aloud")
+	e2.ai.failChat = false
+	_ = e2.r.NarratePage(e2.sto.ID, p2.ID)
+	e2.mustDone("page retry")
+	if got, _ := e2.st.Page(e2.ctx, p2.ID); got.ReadingError != "" || got.ReadingVersion != pipeline.ReadingVersion {
+		t.Fatalf("after retry: %+v", got)
+	}
+	// No drawn pages: nothing to do; a missing page is refused.
 	e3 := newEnv(t)
 	_ = e3.r.Narrate(e3.sto.ID)
 	e3.mustDone("narrate empty")
+	_ = e3.r.NarratePage(e3.sto.ID, 4242)
+	e3.mustFail("missing page", "not found")
 }
 
 const sfxScript = `THE LAMP
@@ -1103,5 +1141,132 @@ func TestSplitLine(t *testing.T) {
 	}
 	if l.Words[0].Tag != "" {
 		t.Fatal("splitting must not change the original line")
+	}
+}
+
+// tagShy fails, like eleven_v3 sometimes does, on lines that are only an
+// audio tag.
+type tagShy struct{ countingVoice }
+
+func (v *tagShy) Speak(ctx context.Context, text, voice string) (*pipeline.Speech, error) {
+	if strings.HasPrefix(text, "[") && strings.HasSuffix(text, "]...") {
+		return nil, fmt.Errorf("elevenlabs: %w", pipeline.ErrNoAudio)
+	}
+	return v.countingVoice.Speak(ctx, text, voice)
+}
+
+func (e *env) onePageWith(lines []*store.PageLine) *store.Page {
+	e.t.Helper()
+	p := e.pages()[0]
+	if err := e.st.ReplacePageLines(e.ctx, p.ID, p.Image, pipeline.ReadingVersion, lines); err != nil {
+		e.t.Fatal(err)
+	}
+	pg, _ := e.st.Page(e.ctx, p.ID)
+	return pg
+}
+
+func TestVocalOnlyLineFallsBackToASoundEffect(t *testing.T) {
+	e := newEnv(t)
+	e.drawnBook()
+	voice := &tagShy{}
+	e.r.Voice = voice
+	speaker := e.chars()[1].Name
+	p := e.onePageWith([]*store.PageLine{{Kind: "bubble", Speaker: speaker, Text: "Zzz... zzz...",
+		Words: []store.LineWord{{Text: "Zzz...", Tag: "snores"}, {Text: "zzz...", Tag: "snores"}}}})
+	_ = e.r.NarratePage(e.sto.ID, p.ID)
+	e.mustDone("narrate page")
+	got, _ := e.st.PageLines(e.ctx, p.ID)
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	l := got[0]
+	if l.Audio == "" || l.Error != "" || l.Voice != VoiceFor(sto, e.chars(), speaker).ID {
+		t.Fatalf("the snore should be made as a sound effect and count as voiced: %+v", l)
+	}
+	if voice.calls["effect:"+pipeline.VocalSound("snores")] != 1 {
+		t.Fatalf("fallback not used: %v", voice.calls)
+	}
+	if l.Words[0].End <= 0 || l.Words[1].End != l.Words[0].End {
+		t.Fatalf("both words should light for the whole snore: %+v", l.Words)
+	}
+}
+
+func TestRetryAndAdjustOneLine(t *testing.T) {
+	e := newEnv(t)
+	e.drawnBook()
+	voice := &countingVoice{}
+	e.r.Voice = voice
+	speaker := e.chars()[0].Name
+	p := e.onePageWith([]*store.PageLine{
+		{Kind: "bubble", Speaker: speaker, Text: "Hello there", Words: []store.LineWord{{Text: "Hello"}, {Text: "there"}}, Error: "voice down"},
+		{Kind: "caption", Text: "CROAK!", Words: []store.LineWord{{Text: "CROAK!"}}},
+		{Kind: "bubble", Speaker: speaker, Text: "Night night", Words: []store.LineWord{{Text: "Night"}, {Text: "night"}}},
+	})
+	lines, _ := e.st.PageLines(e.ctx, p.ID)
+
+	// Retry one failed line: only it is made.
+	if err := e.r.RetryLine(e.sto.ID, lines[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	e.mustDone("retry line")
+	if voice.total() != 1 {
+		t.Fatalf("%d syntheses for one line", voice.total())
+	}
+	if l, _ := e.st.PageLine(e.ctx, lines[0].ID); l.Audio == "" || l.Error != "" {
+		t.Fatalf("retried: %+v", l)
+	}
+
+	// Direct a spoken line to be a sound effect: it is re-planned and made
+	// as one; the lines around it keep their place.
+	if err := e.r.AdjustLine(e.sto.ID, lines[1].ID, "make it a real frog sound effect, longer"); err != nil {
+		t.Fatal(err)
+	}
+	e.mustDone("adjust to effect")
+	got, _ := e.st.PageLines(e.ctx, p.ID)
+	if len(got) != 3 || got[0].Text != "Hello there" || got[2].Text != "Night night" {
+		t.Fatalf("neighbours moved: %+v", got)
+	}
+	if got[1].Sound == "" || got[1].Audio == "" || got[1].Direction != "make it a real frog sound effect, longer" {
+		t.Fatalf("adjusted to an effect: %+v", got[1])
+	}
+
+	// Direct a line to be whispered: the delivery reaches the voice.
+	if err := e.r.AdjustLine(e.sto.ID, got[2].ID, "she whispers this"); err != nil {
+		t.Fatal(err)
+	}
+	e.mustDone("adjust delivery")
+	got, _ = e.st.PageLines(e.ctx, p.ID)
+	if got[2].Delivery != "whispers" || got[2].Audio == "" || got[2].Sound != "" {
+		t.Fatalf("whispered: %+v", got[2])
+	}
+	if got[0].Audio == "" {
+		t.Fatal("an adjustment must not drop other lines' clips")
+	}
+
+	// Failures: an unknown line; a direction the model cannot follow.
+	if err := e.r.RetryLine(e.sto.ID, 424242); err == nil {
+		t.Fatal("unknown line")
+	}
+	e.ai.failChat = true
+	_ = e.r.AdjustLine(e.sto.ID, got[0].ID, "anything")
+	e.mustFail("adjust down", "chat down")
+	voice.fail = true
+	e.ai.failChat = false
+	_ = e.r.RetryLine(e.sto.ID, got[0].ID)
+	e.mustFail("retry down", "could not be made")
+	if l, _ := e.st.PageLine(e.ctx, got[0].ID); l.Error == "" {
+		t.Fatal("a failed retry records the error on the line")
+	}
+}
+
+func TestCurrentPartsDescribeALine(t *testing.T) {
+	fx := &store.PageLine{Sound: "boom", Seconds: 2, Words: []store.LineWord{{Text: "BOOM"}}}
+	if p := currentParts(fx); len(p) != 1 || p[0].Kind != "effect" || p[0].Sound != "boom" {
+		t.Fatalf("effect: %+v", p)
+	}
+	mixed := &store.PageLine{Words: []store.LineWord{{Text: "Ha", Tag: "laughs"}, {Text: "ha", Tag: "laughs"}, {Text: "funny"}}}
+	if p := currentParts(mixed); len(p) != 2 || p[0].To != 1 || p[0].Tag != "laughs" || p[1].Kind != "speech" {
+		t.Fatalf("mixed: %+v", p)
+	}
+	if currentParts(&store.PageLine{}) != nil {
+		t.Fatal("empty line")
 	}
 }
