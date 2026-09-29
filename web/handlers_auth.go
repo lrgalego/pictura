@@ -1,9 +1,11 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/lrgalego/htmx-ds/layout"
 	"golang.org/x/crypto/bcrypt"
@@ -161,9 +163,11 @@ func (s *server) ownsImage(r *http.Request, name string) bool {
 
 func (s *server) serveBlob(w http.ResponseWriter, r *http.Request, name string, read func() ([]byte, string, error)) {
 	if url, err := s.st.Blobs().URL(r.Context(), name); err == nil && url != "" {
-		// The signed URL outlives this hint, so a browser may reuse the
-		// redirect for a few minutes without asking again.
-		w.Header().Set("Cache-Control", "private, max-age=300")
+		// The signed URL is the same until the signing window ends and is
+		// valid well past it, so the browser may keep this redirect until
+		// then; what it points at is cached for good (blob.Immutable).
+		left := int(time.Until(blob.WindowEnd(time.Now())).Seconds())
+		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", max(left, 60)))
 		http.Redirect(w, r, url, http.StatusFound)
 		return
 	}
@@ -173,7 +177,7 @@ func (s *server) serveBlob(w http.ResponseWriter, r *http.Request, name string, 
 		return
 	}
 	w.Header().Set("Content-Type", blob.ContentType(served))
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", blob.Immutable)
 	_, _ = w.Write(b)
 }
 

@@ -696,8 +696,9 @@ func TestMediaRedirectsToSignedURLs(t *testing.T) {
 	if resp.StatusCode != http.StatusFound || !strings.HasSuffix(strings.Split(resp.Header.Get("Location"), "?")[0], name+".thumb.jpg") {
 		t.Fatalf("thumb should redirect to the signed thumbnail url: %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
-	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=300") {
-		t.Fatalf("redirect cache hint: %s", cc)
+	var age int
+	if _, err := fmt.Sscanf(resp.Header.Get("Cache-Control"), "private, max-age=%d", &age); err != nil || age < 60 || age > int(blob.SignWindow.Seconds()) {
+		t.Fatalf("redirect cache hint should last until the signing window ends: %s", resp.Header.Get("Cache-Control"))
 	}
 	// Someone else still gets nothing.
 	other := newEnvClient(t, e)

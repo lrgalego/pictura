@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -22,9 +24,38 @@ type R2 struct {
 	client  *s3.Client
 	presign *s3.PresignClient
 	bucket  string
-	// TTL of presigned URLs. Long enough for a page full of thumbnails to
-	// load and for a browser to revisit within a session.
-	ttl time.Duration
+	now     func() time.Time
+}
+
+// Presigned URLs are stable within a window so browsers can cache what
+// they point at. A URL is signed as of the start of the current window and
+// stays valid for two windows, so it is good for at least a full window
+// after it is handed out; a browser re-downloads a blob at most about once
+// per window. Blob names are never reused (a new drawing or clip is a new
+// name), which is what makes caching them for good safe.
+const (
+	SignWindow = 12 * time.Hour
+	signTTL    = 2 * SignWindow
+	// Immutable is the cache policy of every blob: its name never points
+	// at different bytes.
+	Immutable = "private, max-age=31536000, immutable"
+)
+
+// WindowEnd is when URLs signed at t stop being handed out, so a redirect
+// to one may be cached until then.
+func WindowEnd(t time.Time) time.Time {
+	return t.UTC().Truncate(SignWindow).Add(SignWindow)
+}
+
+// fixedTime signs as of a set time instead of now; that is all it takes
+// for two presigns of one object in one window to be the same URL.
+type fixedTime struct {
+	signer *v4.Signer
+	at     time.Time
+}
+
+func (f fixedTime) PresignHTTP(ctx context.Context, creds aws.Credentials, r *http.Request, payloadHash, service, region string, _ time.Time, optFns ...func(*v4.SignerOptions)) (string, http.Header, error) {
+	return f.signer.PresignHTTP(ctx, creds, r, payloadHash, service, region, f.at, optFns...)
 }
 
 // R2Config is what an R2 bucket needs: the account, an API token with
@@ -57,7 +88,7 @@ func NewR2(cfg R2Config) (*R2, error) {
 		Credentials:  credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		UsePathStyle: true,
 	})
-	return &R2{client: client, presign: s3.NewPresignClient(client), bucket: cfg.Bucket, ttl: time.Hour}, nil
+	return &R2{client: client, presign: s3.NewPresignClient(client), bucket: cfg.Bucket, now: time.Now}, nil
 }
 
 func (r *R2) Put(ctx context.Context, name string, data []byte) error {
@@ -69,7 +100,7 @@ func (r *R2) Put(ctx context.Context, name string, data []byte) error {
 		Key:          aws.String(name),
 		Body:         bytes.NewReader(data),
 		ContentType:  aws.String(ContentType(name)),
-		CacheControl: aws.String("private, max-age=31536000, immutable"),
+		CacheControl: aws.String(Immutable),
 	})
 	return err
 }
@@ -98,12 +129,19 @@ func (r *R2) Delete(ctx context.Context, name string) error {
 	return err
 }
 
-// URL is a presigned GET valid for the store's TTL.
+// URL is a presigned GET, the same for a blob all through a signing
+// window. It also asks R2 to answer with the immutable cache policy, which
+// covers objects stored before Put set it.
 func (r *R2) URL(ctx context.Context, name string) (string, error) {
 	if !safe(name) {
 		return "", ErrNotFound
 	}
-	req, err := r.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r.bucket), Key: aws.String(name)}, s3.WithPresignExpires(r.ttl))
+	at := r.now().UTC().Truncate(SignWindow)
+	in := &s3.GetObjectInput{Bucket: aws.String(r.bucket), Key: aws.String(name), ResponseCacheControl: aws.String(Immutable)}
+	req, err := r.presign.PresignGetObject(ctx, in, func(o *s3.PresignOptions) {
+		o.Expires = signTTL
+		o.Presigner = fixedTime{signer: v4.NewSigner(), at: at}
+	})
 	if err != nil {
 		return "", err
 	}

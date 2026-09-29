@@ -4,9 +4,11 @@ package blob
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestR2Probe talks to the real bucket named in the environment: put, get,
@@ -29,6 +31,20 @@ func TestR2Probe(t *testing.T) {
 		t.Fatalf("presign: %s %v", u, err)
 	}
 	t.Logf("presigned url host: %s", strings.SplitN(strings.TrimPrefix(u, "https://"), "/", 2)[0])
+	// R2 accepts a URL signed as of the window start (up to a window ago)
+	// and answers with the immutable cache policy browsers need.
+	resp, err := http.Get(u)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != Immutable {
+		t.Fatalf("fetch: %d, Cache-Control %q", resp.StatusCode, resp.Header.Get("Cache-Control"))
+	}
+	t.Logf("signed at window start %s; R2 answered %d with Cache-Control %q", time.Now().UTC().Truncate(SignWindow).Format(time.RFC3339), resp.StatusCode, resp.Header.Get("Cache-Control"))
+	if again, _ := r2.URL(ctx, "probe.png"); again != u {
+		t.Fatal("a second presign in the same window should be the same url")
+	}
 	if err := r2.Delete(ctx, "probe.png"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

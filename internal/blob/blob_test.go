@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestContentType(t *testing.T) {
@@ -126,7 +127,7 @@ func TestR2AgainstAFakeBucket(t *testing.T) {
 		t.Fatalf("missing: %v", err)
 	}
 	u, err := r2.URL(ctx, "a.png")
-	if err != nil || !strings.HasPrefix(u, srv.URL+"/bucket/a.png?") || !strings.Contains(u, "X-Amz-Signature=") || !strings.Contains(u, "X-Amz-Expires=3600") {
+	if err != nil || !strings.HasPrefix(u, srv.URL+"/bucket/a.png?") || !strings.Contains(u, "X-Amz-Signature=") || !strings.Contains(u, "X-Amz-Expires=86400") || !strings.Contains(u, "response-cache-control=private%2C%20max-age%3D31536000%2C%20immutable") {
 		t.Fatalf("presigned url: %s %v", u, err)
 	}
 	resp, err := http.Get(u)
@@ -174,5 +175,42 @@ func TestR2Config(t *testing.T) {
 	u, err := r2.URL(context.Background(), "x.png")
 	if err != nil || !strings.HasPrefix(u, "https://acct.r2.cloudflarestorage.com/b/x.png?") {
 		t.Fatalf("account endpoint: %s %v", u, err)
+	}
+}
+
+// Presigned URLs are stable within a signing window, so browsers can cache
+// what they point at, and change with the next window.
+func TestR2URLsAreStableWithinAWindow(t *testing.T) {
+	r2, err := NewR2(R2Config{AccountID: "acct", AccessKeyID: "a", SecretAccessKey: "s", Bucket: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	at := func(s string) func() time.Time {
+		tm, _ := time.Parse(time.RFC3339, s)
+		return func() time.Time { return tm }
+	}
+	r2.now = at("2026-09-29T12:00:01Z")
+	first, _ := r2.URL(ctx, "x.png")
+	r2.now = at("2026-09-29T23:59:59Z")
+	same, _ := r2.URL(ctx, "x.png")
+	if first != same {
+		t.Fatalf("one window, two urls:\n%s\n%s", first, same)
+	}
+	if !strings.Contains(first, "X-Amz-Date=20260929T120000Z") {
+		t.Fatalf("signed as of the window start: %s", first)
+	}
+	r2.now = at("2026-09-30T00:00:00Z")
+	next, _ := r2.URL(ctx, "x.png")
+	if next == first || !strings.Contains(next, "X-Amz-Date=20260930T000000Z") {
+		t.Fatalf("the next window signs anew: %s", next)
+	}
+	other, _ := r2.URL(ctx, "y.png")
+	if other == next {
+		t.Fatal("different blobs, same url")
+	}
+	end := WindowEnd(time.Date(2026, 9, 29, 13, 30, 0, 0, time.FixedZone("x", -4*3600)))
+	if !end.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("window end: %v", end)
 	}
 }
