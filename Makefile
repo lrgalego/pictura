@@ -82,10 +82,15 @@ cover-check:
 generate:
 	$(TEMPL) generate
 
-# Generated views are committed, so they must match their sources: regenerate
-# and fail if anything moved (or appeared) — commit the result.
-check-generated: generate
-	@if ! git diff --quiet -- '*_templ.go' || [ -n "$$(git ls-files --others --exclude-standard -- '*_templ.go')" ]; then \
+# Generated views are committed, so they must match their sources: fail if
+# regenerating changes (or adds) any *_templ.go — compared with the files as
+# they were, not with git, so uncommitted work that is already fresh passes.
+GENERATED_SUMS = for f in $$(git ls-files --cached --others --exclude-standard -- '*_templ.go' | sort); do cksum "$$f"; done
+check-generated:
+	@before=$$($(GENERATED_SUMS)); \
+	$(TEMPL) generate >/dev/null 2>&1 || { printf '\n  templ generate failed — run `make generate` to see why.\n\n'; exit 1; }; \
+	after=$$($(GENERATED_SUMS)); \
+	if [ "$$before" != "$$after" ]; then \
 		printf '\n  generated *_templ.go files were stale — regenerated now; commit them.\n\n'; \
 		exit 1; \
 	fi
