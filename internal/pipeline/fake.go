@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/png"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -158,6 +159,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 		v = fakeCasting(user)
 	case "lettering":
 		v = fakeLettering(user)
+	case "sounds":
+		v = fakeSounds(user)
 	case "page":
 		pages := breakdown(script, cast(script))
 		p := pages[0]
@@ -197,6 +200,36 @@ func fakeCasting(user string) map[string]any {
 		chars = append(chars, map[string]string{"name": name, "voice": free[len(chars)%len(free)]})
 	}
 	return map[string]any{"narrator": DefaultNarrator, "characters": chars}
+}
+
+// The fake sound designer knows a few comic sounds by name: effects become
+// effect parts, vocal sounds tags, everything else stays speech.
+var (
+	fakeEffects = map[string]string{"poof": "a soft magical poof", "boom": "a big cartoon explosion", "bang": "a loud bang", "crash": "something crashing down", "stomp": "a heavy stomp", "splash": "a splash of water", "whoosh": "a fast whoosh", "pow": "a cartoon punch", "thud": "a dull thud"}
+	fakeVocals  = map[string]string{"yawn": "yawns", "yaaawn": "yawns", "zzz": "snores", "grr": "growls", "haha": "laughs", "hehe": "giggles", "eep": "gasps", "gasp": "gasps", "sigh": "sighs"}
+	fakeLineRe  = regexp.MustCompile(`(?m)^Line (\d+) \([^)]*\):(.*)$`)
+	fakeWordRe  = regexp.MustCompile(`\[(\d+)\](\S+)`)
+)
+
+func fakeSounds(user string) map[string]any {
+	var lines []map[string]any
+	for _, m := range fakeLineRe.FindAllStringSubmatch(user, -1) {
+		n, _ := strconv.Atoi(m[1])
+		var parts []map[string]any
+		for _, w := range fakeWordRe.FindAllStringSubmatch(m[2], -1) {
+			i, _ := strconv.Atoi(w[1])
+			key := strings.Trim(strings.ToLower(w[2]), ".,!?…'\"")
+			part := map[string]any{"from": i, "to": i, "kind": "speech", "tag": "", "sound": "", "seconds": 0}
+			if s, ok := fakeEffects[key]; ok {
+				part["kind"], part["sound"], part["seconds"] = "effect", s, 1.0
+			} else if t, ok := fakeVocals[key]; ok {
+				part["kind"], part["tag"] = "vocal", t
+			}
+			parts = append(parts, part)
+		}
+		lines = append(lines, map[string]any{"line": n, "parts": parts})
+	}
+	return map[string]any{"lines": lines}
 }
 
 func after(s, marker string) string {

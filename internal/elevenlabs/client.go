@@ -121,6 +121,57 @@ func (c *Client) Speak(ctx context.Context, text, voiceID string) (*pipeline.Spe
 	return sp, nil
 }
 
+type soundRequest struct {
+	Text            string  `json:"text"`
+	DurationSeconds float64 `json:"duration_seconds"`
+	PromptInfluence float64 `json:"prompt_influence"`
+}
+
+// SoundModel is the sound-effects model (the only one ElevenLabs offers).
+const SoundModel = "eleven_text_to_sound_v2"
+
+// Sound generates a sound effect from a description. The length is always
+// given: the model bills per second, and an unbounded "auto" length is
+// both dearer and harder to time the highlight against.
+func (c *Client) Sound(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
+	if c.sem != nil {
+		select {
+		case c.sem <- struct{}{}:
+			defer func() { <-c.sem }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	// Adherence over creativity: the description names the sound wanted.
+	payload, err := json.Marshal(soundRequest{Text: prompt, DurationSeconds: seconds, PromptInfluence: 0.6})
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("%s/sound-generation?output_format=%s", c.BaseURL, url.QueryEscape(c.Format))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("xi-api-key", c.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("elevenlabs: %s", errorMessage(resp.StatusCode, data))
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("elevenlabs: the sound effect came back empty")
+	}
+	return &pipeline.Speech{Audio: data, Ext: "mp3"}, nil
+}
+
 // errorMessage pulls the human message out of ElevenLabs' error body, whose
 // detail is an object with a message, or sometimes a plain string.
 func errorMessage(status int, body []byte) string {

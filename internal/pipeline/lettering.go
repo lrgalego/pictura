@@ -43,6 +43,7 @@ type Box struct {
 type LetterWord struct {
 	Text string `json:"text"`
 	Box  Box    `json:"box"`
+	Tag  string `json:"tag,omitempty"` // a vocal the speaker performs instead of saying the word
 }
 
 // LetterLine is one balloon, caption, title or sound effect.

@@ -744,6 +744,20 @@ func (c *countingVoice) Speak(ctx context.Context, text, voice string) (*pipelin
 	return pipeline.FakeVoice{}.Speak(ctx, text, voice)
 }
 
+func (c *countingVoice) Sound(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
+	c.mu.Lock()
+	if c.calls == nil {
+		c.calls = map[string]int{}
+	}
+	c.calls["effect:"+prompt]++
+	fail := c.fail
+	c.mu.Unlock()
+	if fail {
+		return nil, errors.New("voice down")
+	}
+	return pipeline.FakeVoice{}.Sound(ctx, prompt, seconds)
+}
+
 func (c *countingVoice) total() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -904,4 +918,190 @@ func TestNarrateFailures(t *testing.T) {
 	e3 := newEnv(t)
 	_ = e3.r.Narrate(e3.sto.ID)
 	e3.mustDone("narrate empty")
+}
+
+const sfxScript = `THE LAMP
+
+MARA: POOF! The lamp is lit.
+PIP: Yawn... so late.
+GRAVES: Who is there?
+MARA: Only us.
+`
+
+// soundsDown wraps the fake: counts page readings and can fail the
+// sound-design call alone.
+type soundsDown struct {
+	pipeline.AI
+	mu       sync.Mutex
+	fail     bool
+	readings int
+	designs  int
+}
+
+func (s *soundsDown) ChatJSON(ctx context.Context, system, user string, images []pipeline.Image, schemaName string, schema map[string]any, out any) error {
+	s.mu.Lock()
+	switch schemaName {
+	case "lettering":
+		s.readings++
+	case "sounds":
+		s.designs++
+		if s.fail {
+			s.mu.Unlock()
+			return errors.New("sound design down")
+		}
+	}
+	s.mu.Unlock()
+	return s.AI.ChatJSON(ctx, system, user, images, schemaName, schema, out)
+}
+
+func sfxEnv(t *testing.T) (*env, *soundsDown, *countingVoice) {
+	e := newEnv(t)
+	ai := &soundsDown{AI: &pipeline.Fake{}}
+	voice := &countingVoice{}
+	e.r = New(e.st, ai, 0)
+	e.r.Voice = voice
+	e.sto.Script = sfxScript
+	_ = e.st.UpdateStory(e.ctx, e.sto)
+	return e, ai, voice
+}
+
+func TestNarrateDesignsSounds(t *testing.T) {
+	e, ai, voice := sfxEnv(t)
+	e.drawnBook()
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobDone {
+		t.Fatalf("narrate: %+v", j)
+	}
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	chars := e.chars()
+	lines, _ := e.st.StoryLines(e.ctx, e.sto.ID)
+	var effect, vocal *store.PageLine
+	for _, p := range e.pages() {
+		if p.ReadingVersion != pipeline.ReadingVersion || !NarrationReady(sto, chars, p, lines[p.ID]) {
+			t.Fatalf("page %d: %+v", p.Number, p)
+		}
+		for _, l := range lines[p.ID] {
+			if l.Sound != "" && effect == nil {
+				effect = l
+			}
+			for _, w := range l.Words {
+				if w.Tag != "" && vocal == nil {
+					vocal = l
+				}
+			}
+		}
+	}
+	if effect == nil || effect.Text != "POOF!" || effect.Voice != effectVoice || effect.Audio == "" || effect.Words[0].End != effect.Seconds {
+		t.Fatalf("POOF! should be its own sound effect: %+v", effect)
+	}
+	if voice.calls["effect:"+effect.Sound] == 0 {
+		t.Fatalf("no sound was generated: %v", voice.calls)
+	}
+	if vocal == nil || vocal.Sound != "" || vocal.Audio == "" {
+		t.Fatalf("the yawn should be performed in the speaker's voice: %+v", vocal)
+	}
+	for _, w := range vocal.Words {
+		if w.Tag == "yawns" && (w.Text != "Yawn..." || w.End <= w.Start) {
+			t.Fatalf("the tagged word should be timed like any other: %+v", w)
+		}
+	}
+	if ai.designs == 0 {
+		t.Fatal("no sound design pass ran")
+	}
+
+	// Reading aloud an unchanged book again costs nothing.
+	before := voice.total()
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("again")
+	if voice.total() != before {
+		t.Fatalf("re-narrating cost %d syntheses", voice.total()-before)
+	}
+}
+
+// A page read before sound design existed is designed without being read
+// again, and its plain speech keeps its clip.
+func TestNarrateUpgradesOldReadings(t *testing.T) {
+	e, ai, voice := sfxEnv(t)
+	e.drawnBook()
+	p := e.pages()[0]
+	sto, _ := e.st.Story(e.ctx, e.sto.ID)
+	speaker := e.chars()[0].Name
+	old := []*store.PageLine{
+		{Kind: "bubble", Speaker: speaker, Text: "Hello there", Audio: "kept.mp3", Voice: VoiceFor(sto, e.chars(), speaker).ID,
+			Words: []store.LineWord{{Text: "Hello", Start: 0, End: 0.4}, {Text: "there", Start: 0.5, End: 0.9}}},
+		{Kind: "caption", Text: "BOOM! Silence.", Words: []store.LineWord{{Text: "BOOM!"}, {Text: "Silence."}}},
+	}
+	if err := e.st.ReplacePageLines(e.ctx, p.ID, p.Image, 1, old); err != nil {
+		t.Fatal(err)
+	}
+	readings, speaks := ai.readings, voice.total()
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("upgrade")
+	if ai.readings != readings {
+		t.Fatal("an old reading must not be read again")
+	}
+	got, _ := e.st.PageLines(e.ctx, p.ID)
+	if len(got) != 3 || got[0].Audio != "kept.mp3" || got[1].Sound == "" || got[1].Text != "BOOM!" || got[2].Text != "Silence." || got[2].Speaker != "" {
+		t.Fatalf("upgraded lines: %+v", got)
+	}
+	// One effect and one narrated word were made; the kept line was not.
+	if n := voice.total() - speaks; n != 2 {
+		t.Fatalf("%d syntheses, want 2 (the boom and the narration)", n)
+	}
+	if pg, _ := e.st.Page(e.ctx, p.ID); pg.ReadingVersion != pipeline.ReadingVersion {
+		t.Fatalf("version: %d", pg.ReadingVersion)
+	}
+}
+
+// When sound design fails, the reading is kept (at version 1) and the page
+// says why; the next attempt only designs.
+func TestSoundDesignFailureKeepsTheReading(t *testing.T) {
+	e, ai, _ := sfxEnv(t)
+	ai.fail = true
+	e.drawnBook()
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobError || !strings.Contains(j.Error, "sound design down") {
+		t.Fatalf("narrate: %+v", j)
+	}
+	for _, p := range e.pages() {
+		if p.ReadingImage != p.Image || p.ReadingVersion != 1 || !strings.Contains(p.ReadingError, "sound design down") {
+			t.Fatalf("page: %+v", p)
+		}
+	}
+	readings := ai.readings
+	ai.fail = false
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("retry")
+	if ai.readings != readings {
+		t.Fatal("the retry read the pages again")
+	}
+	for _, p := range e.pages() {
+		if p.ReadingVersion != pipeline.ReadingVersion || p.ReadingError != "" {
+			t.Fatalf("after retry: %+v", p)
+		}
+	}
+}
+
+func TestSplitLine(t *testing.T) {
+	l := &store.PageLine{Kind: "bubble", Speaker: "Mara", Box: store.LineBox{X2: 1, Y2: 1}, Audio: "old.mp3",
+		Words: []store.LineWord{{Text: "Grr."}, {Text: "Go"}, {Text: "away!"}, {Text: "SLAM!"}}}
+	// Plain speech: the very same line, clip and all.
+	if got := splitLine(l, []pipeline.Part{{From: 0, To: 3, Kind: "speech"}}); len(got) != 1 || got[0] != l {
+		t.Fatal("plain speech must be kept as is")
+	}
+	got := splitLine(l, []pipeline.Part{
+		{From: 0, To: 0, Kind: "vocal", Tag: "growls"},
+		{From: 1, To: 2, Kind: "speech"},
+		{From: 3, To: 3, Kind: "effect", Sound: "a door slams", Seconds: 1},
+	})
+	if len(got) != 2 {
+		t.Fatalf("rows: %+v", got)
+	}
+	if got[0].Text != "Grr. Go away!" || got[0].Words[0].Tag != "growls" || got[0].Words[1].Tag != "" || got[0].Audio != "" || got[0].Speaker != "Mara" || got[0].Box != l.Box {
+		t.Fatalf("voiced row: %+v", got[0])
+	}
+	if got[1].Text != "SLAM!" || got[1].Sound != "a door slams" || got[1].Seconds != 1 || got[1].Box != l.Box {
+		t.Fatalf("effect row: %+v", got[1])
+	}
+	if l.Words[0].Tag != "" {
+		t.Fatal("splitting must not change the original line")
+	}
 }

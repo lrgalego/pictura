@@ -154,3 +154,41 @@ func TestReadAStoryWithoutArt(t *testing.T) {
 		t.Fatalf("nothing to prepare without art: %s", body)
 	}
 }
+
+func TestReadMarksSoundEffects(t *testing.T) {
+	e := newEnv(t)
+	e.signup("foley")
+	sfx := "THE LAMP\n\nMARA: POOF! The lamp is lit.\nPIP: Yawn... so late.\nGRAVES: Who is there in the dark, up the old lighthouse stairs?\nMARA: Only us, and the sea, and a robot who hates heights and loves stories.\n"
+	resp, _ := e.post("/stories", map[string][]string{"title": {"Lamp"}, "script": {sfx}, "style": {"comic"}}, false)
+	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
+	e.waitIdle()
+	for _, step := range []string{"/characters/draw", "/characters/approve", "/pages/approve"} {
+		e.post(base+step, nil, true)
+		e.waitIdle()
+	}
+	var effect *readLine
+	var tagged bool
+	for _, p := range e.readJSON(base).Pages {
+		if p.Status != readReady {
+			t.Fatalf("page %d: %+v", p.Number, p)
+		}
+		for i, l := range p.Lines {
+			if l.Effect != "" && effect == nil {
+				effect = &p.Lines[i]
+			}
+			for _, w := range l.Words {
+				tagged = tagged || w.Tag == "yawns"
+			}
+		}
+	}
+	if effect == nil || effect.Text != "POOF!" || !strings.HasPrefix(effect.Audio, "/media/") {
+		t.Fatalf("POOF! should come through as a sound effect: %+v", effect)
+	}
+	if !tagged {
+		t.Fatal("the yawn's tag should reach the reader")
+	}
+	_, body := e.get(base + "/read")
+	if !strings.Contains(body, "reader.js") {
+		t.Fatal("reader page")
+	}
+}

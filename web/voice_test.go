@@ -113,6 +113,10 @@ func (c *countingVoice) Speak(ctx context.Context, text, voice string) (*pipelin
 	return &pipeline.Speech{Audio: []byte("ID3" + text), Ext: "mp3"}, nil
 }
 
+func (c *countingVoice) Sound(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
+	return &pipeline.Speech{Audio: []byte("ID3sfx"), Ext: "mp3"}, nil
+}
+
 func TestVoicePreviewCacheAndErrors(t *testing.T) {
 	e := newEnv(t)
 	e.signup("cacher")

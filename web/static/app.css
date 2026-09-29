@@ -622,6 +622,17 @@ h1, h2, h3, .display {
 
 .reader__who { min-height: 1.6rem; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--pop); }
 .reader__who--narrator { color: var(--pop-3); }
+.reader__who--effect { color: var(--pop-2); letter-spacing: 0.02em; }
+/* A sound effect: the whole word group lights up in a warmer colour and
+   gives a little shake. */
+.reader__hl.is-effect { background: rgb(255 122 61 / 0.5); }
+.reader__hl.is-effect.is-pop { animation: reader-shake .45s ease-out; }
+@keyframes reader-shake {
+  0% { transform: scale(1.25) rotate(-3deg); }
+  30% { transform: scale(1.1) rotate(3deg); }
+  60% { transform: scale(1.04) rotate(-1.5deg); }
+  100% { transform: none; }
+}
 
 .reader__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem; }
 .reader__ctl { width: 2.75rem; height: 2.75rem; border-radius: 999px; border: 2px solid var(--stage-muted); background: transparent; color: var(--stage-ink); display: grid; place-items: center; cursor: pointer; }
@@ -648,5 +659,5 @@ h1, h2, h3, .display {
 }
 @media (prefers-reduced-motion: reduce) {
   .reader__sheet, .reader__spot, .reader__hl { transition: none; }
-  .reader__sheet.is-turning, .reader__hl.is-pop, .reader__big::after { animation: none; }
+  .reader__sheet.is-turning, .reader__hl.is-pop, .reader__hl.is-effect.is-pop, .reader__big::after { animation: none; }
 }

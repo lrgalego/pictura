@@ -986,18 +986,25 @@ func (r *Runner) Narrate(storyID int64) error {
 }
 
 // NarrationReady reports whether a drawn page can be read aloud as it is:
-// read from its current art, every line voiced in its speaker's voice.
+// read from its current art with sound design done, every spoken line
+// voiced in its speaker's voice and every sound effect made.
 func NarrationReady(story *store.Story, chars []*store.Character, p *store.Page, lines []*store.PageLine) bool {
-	if p.ImageStatus != store.ImageReady || p.Image == "" || p.ReadingImage != p.Image {
+	if p.ImageStatus != store.ImageReady || p.Image == "" || p.ReadingImage != p.Image || p.ReadingVersion < pipeline.ReadingVersion {
 		return false
 	}
 	for _, l := range lines {
-		if len(l.Words) > 0 && (l.Audio == "" || l.Voice != VoiceFor(story, chars, l.Speaker).ID) {
+		if len(l.Words) == 0 {
+			continue
+		}
+		if l.Audio == "" || (l.Sound == "" && l.Voice != VoiceFor(story, chars, l.Speaker).ID) {
 			return false
 		}
 	}
 	return true
 }
+
+// effectVoice marks a line's clip as a sound effect rather than a voice.
+const effectVoice = "effect"
 
 // VoiceFor is the voice a line is read in: its speaker's, or the
 // narrator's for captions and unknown speakers.
@@ -1013,24 +1020,37 @@ func VoiceFor(story *store.Story, chars []*store.Character, speaker string) pipe
 }
 
 func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*store.Character, p *store.Page) error {
-	if p.ReadingImage != p.Image {
+	if p.ReadingImage != p.Image || p.ReadingVersion < pipeline.ReadingVersion {
 		png, err := r.st.ReadImage(ctx, p.Image)
 		if err != nil {
 			return err
 		}
-		read, err := pipeline.ReadPage(ctx, r.ai, chars, p, png)
+		var lines []*store.PageLine
+		if p.ReadingImage != p.Image {
+			read, err := pipeline.ReadPage(ctx, r.ai, chars, p, png)
+			if err != nil {
+				return err
+			}
+			for _, l := range read {
+				pl := &store.PageLine{Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: store.LineBox(l.Box), Exact: l.Exact}
+				for _, w := range l.Words {
+					pl.Words = append(pl.Words, store.LineWord{Text: w.Text, Box: store.LineBox(w.Box)})
+				}
+				lines = append(lines, pl)
+			}
+			// Keep the reading even if sound design fails below: reading
+			// the page is the expensive half, and it is done.
+			if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, 1, lines); err != nil {
+				return err
+			}
+		} else if lines, err = r.st.PageLines(ctx, p.ID); err != nil {
+			return err
+		}
+		designed, err := r.designSounds(ctx, story, p, png, lines)
 		if err != nil {
 			return err
 		}
-		var lines []*store.PageLine
-		for _, l := range read {
-			pl := &store.PageLine{Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: store.LineBox(l.Box), Exact: l.Exact}
-			for _, w := range l.Words {
-				pl.Words = append(pl.Words, store.LineWord{Text: w.Text, Box: store.LineBox(w.Box)})
-			}
-			lines = append(lines, pl)
-		}
-		if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, lines); err != nil {
+		if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, pipeline.ReadingVersion, designed); err != nil {
 			return err
 		}
 	}
@@ -1042,21 +1062,36 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 	var mu sync.Mutex
 	var firstErr error
 	for _, l := range lines {
-		voice := VoiceFor(story, chars, l.Speaker)
-		if len(l.Words) == 0 || (l.Audio != "" && l.Voice == voice.ID) {
+		if len(l.Words) == 0 {
 			continue
 		}
+		var work func() error
+		switch {
+		case l.Sound != "":
+			if l.Audio != "" {
+				continue
+			}
+			l := l
+			work = func() error { return r.soundLine(ctx, story.ID, l) }
+		default:
+			voice := VoiceFor(story, chars, l.Speaker)
+			if l.Audio != "" && l.Voice == voice.ID {
+				continue
+			}
+			l := l
+			work = func() error { return r.voiceLine(ctx, story.ID, l, voice.ID) }
+		}
 		wg.Add(1)
-		go func(l *store.PageLine) {
+		go func() {
 			defer wg.Done()
-			if err := r.voiceLine(ctx, story.ID, l, voice.ID); err != nil {
+			if err := work(); err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err
 				}
 				mu.Unlock()
 			}
-		}(l)
+		}()
 	}
 	wg.Wait()
 	if firstErr != nil {
@@ -1065,13 +1100,88 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 	return r.st.SetReadingError(ctx, p.ID, "")
 }
 
-// voiceLine synthesizes one line and times each lettered word.
+// designSounds runs the sound-design pass over a page's read lines and
+// splits them into what is played: a run of speech (with any vocals the
+// speaker performs as audio tags) is one voiced line; each sound effect is
+// a line of its own, in reading order, in the same balloon. A line that
+// stays plain speech is kept as it was, clip included.
+func (r *Runner) designSounds(ctx context.Context, story *store.Story, p *store.Page, png []byte, lines []*store.PageLine) ([]*store.PageLine, error) {
+	plan := make([]pipeline.PlanLine, len(lines))
+	for i, l := range lines {
+		plan[i] = pipeline.PlanLine{Kind: l.Kind, Speaker: l.Speaker}
+		for _, w := range l.Words {
+			plan[i].Words = append(plan[i].Words, w.Text)
+		}
+	}
+	parts, err := pipeline.PlanSounds(ctx, r.ai, story, p, png, plan)
+	if err != nil {
+		return nil, err
+	}
+	var out []*store.PageLine
+	for i, l := range lines {
+		out = append(out, splitLine(l, parts[i])...)
+	}
+	return out, nil
+}
+
+// splitLine applies a line's sound design.
+func splitLine(l *store.PageLine, parts []pipeline.Part) []*store.PageLine {
+	if len(parts) <= 1 && (len(parts) == 0 || parts[0].Kind == "speech") {
+		return []*store.PageLine{l}
+	}
+	var out []*store.PageLine
+	var cur *store.PageLine
+	flush := func() {
+		if cur != nil {
+			cur.Text = joinWords(cur.Words)
+			out = append(out, cur)
+			cur = nil
+		}
+	}
+	for _, pt := range parts {
+		words := make([]store.LineWord, 0, pt.To-pt.From+1)
+		for _, w := range l.Words[pt.From : pt.To+1] {
+			words = append(words, store.LineWord{Text: w.Text, Box: w.Box})
+		}
+		if pt.Kind == "effect" {
+			flush()
+			fx := &store.PageLine{Kind: l.Kind, Speaker: l.Speaker, Box: l.Box, Exact: l.Exact, Words: words, Sound: pt.Sound, Seconds: pt.Seconds}
+			fx.Text = joinWords(words)
+			out = append(out, fx)
+			continue
+		}
+		if cur == nil {
+			cur = &store.PageLine{Kind: l.Kind, Speaker: l.Speaker, Box: l.Box, Exact: l.Exact}
+		}
+		for i := range words {
+			if pt.Kind == "vocal" {
+				words[i].Tag = pt.Tag
+			}
+		}
+		cur.Words = append(cur.Words, words...)
+	}
+	flush()
+	return out
+}
+
+func joinWords(ws []store.LineWord) string {
+	t := make([]string, len(ws))
+	for i, w := range ws {
+		t[i] = w.Text
+	}
+	return strings.Join(t, " ")
+}
+
+// voiceLine synthesizes one line and times each lettered word. Words the
+// speaker performs as a vocal go to the voice as an audio tag and share
+// its time.
 func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine, voice string) error {
 	lettered := make([]pipeline.LetterWord, len(l.Words))
 	for i, w := range l.Words {
-		lettered[i] = pipeline.LetterWord{Text: w.Text}
+		lettered[i] = pipeline.LetterWord{Text: w.Text, Tag: w.Tag}
 	}
-	sp, err := r.Voice.Speak(ctx, pipeline.SpokenText(lettered), voice)
+	text, owners := pipeline.Script(lettered)
+	sp, err := r.Voice.Speak(ctx, text, voice)
 	if err != nil {
 		return err
 	}
@@ -1079,10 +1189,28 @@ func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine
 	if err != nil {
 		return err
 	}
-	times := pipeline.AlignWords(len(l.Words), lettered, sp.Words)
+	times := pipeline.AlignTokens(len(l.Words), owners, text, sp.Words)
 	words := append([]store.LineWord(nil), l.Words...)
 	for i := range words {
 		words[i].Start, words[i].End = times[i][0], times[i][1]
 	}
 	return r.st.SetLineAudio(ctx, l.ID, voice, name, words)
+}
+
+// soundLine makes a line's sound effect; its words light up together for
+// as long as it plays.
+func (r *Runner) soundLine(ctx context.Context, storyID int64, l *store.PageLine) error {
+	sp, err := r.Voice.Sound(ctx, l.Sound, l.Seconds)
+	if err != nil {
+		return err
+	}
+	name, err := r.st.SaveAudio(ctx, storyID, sp.Ext, sp.Audio)
+	if err != nil {
+		return err
+	}
+	words := append([]store.LineWord(nil), l.Words...)
+	for i := range words {
+		words[i].Start, words[i].End = 0, l.Seconds
+	}
+	return r.st.SetLineAudio(ctx, l.ID, effectVoice, name, words)
 }

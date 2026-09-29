@@ -69,3 +69,24 @@ func wav(samples []int16) []byte {
 	_ = binary.Write(&b, binary.LittleEndian, samples)
 	return b.Bytes()
 }
+
+// Sound is the offline sound effect: a burst of noise, as long as asked,
+// fading out.
+func (FakeVoice) Sound(ctx context.Context, prompt string, seconds float64) (*Speech, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	h := fnv.New32a()
+	h.Write([]byte(prompt))
+	seed := h.Sum32() | 1
+	n := int(seconds * fakeRate)
+	samples := make([]int16, n)
+	for i := range samples {
+		seed ^= seed << 13
+		seed ^= seed >> 17
+		seed ^= seed << 5
+		fade := 1 - float64(i)/float64(n)
+		samples[i] = int16(float64(int16(seed)) * 0.2 * fade)
+	}
+	return &Speech{Audio: wav(samples), Ext: "wav"}, nil
+}

@@ -177,3 +177,55 @@ func TestSpeakLimitsConcurrency(t *testing.T) {
 		t.Fatalf("cancelled wait: %v", err)
 	}
 }
+
+func TestSound(t *testing.T) {
+	var got *http.Request
+	var sent map[string]any
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &sent)
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = io.WriteString(w, "ID3sound")
+	}))
+	defer s.Close()
+	sp, err := client(s).Sound(context.Background(), "two heavy stomps", 1.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL.Path != "/sound-generation" || got.URL.Query().Get("output_format") != DefaultFormat || got.Header.Get("xi-api-key") != "sk_test" {
+		t.Fatalf("request: %s %v", got.URL, got.Header)
+	}
+	if sent["text"] != "two heavy stomps" || sent["duration_seconds"] != 1.5 || sent["prompt_influence"] != 0.6 {
+		t.Fatalf("body: %v", sent)
+	}
+	if sp.Ext != "mp3" || string(sp.Audio) != "ID3sound" || len(sp.Words) != 0 {
+		t.Fatalf("speech: %+v", sp)
+	}
+	// Errors say why; an empty answer is an error too.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission sound_generation"}}`)
+	}))
+	defer bad.Close()
+	if _, err := client(bad).Sound(context.Background(), "x", 1); err == nil || !strings.Contains(err.Error(), "sound_generation") {
+		t.Fatalf("permission error: %v", err)
+	}
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer empty.Close()
+	if _, err := client(empty).Sound(context.Background(), "x", 1); err == nil {
+		t.Fatal("empty sound accepted")
+	}
+	c := client(s)
+	c.BaseURL = "http://127.0.0.1:1"
+	if _, err := c.Sound(context.Background(), "x", 1); err == nil {
+		t.Fatal("transport error ignored")
+	}
+	c.sem <- struct{}{}
+	c.sem <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Sound(ctx, "x", 1); err != context.Canceled {
+		t.Fatalf("cancelled: %v", err)
+	}
+}

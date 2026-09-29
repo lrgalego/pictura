@@ -28,6 +28,9 @@ type readLine struct {
 	Box     store.LineBox    `json:"box"`
 	Audio   string           `json:"audio,omitempty"`
 	Words   []store.LineWord `json:"words"`
+	// Effect is set on a sound effect: its words light up together while
+	// it plays, and nobody "says" it.
+	Effect string `json:"effect,omitempty"`
 }
 
 type readPageData struct {
@@ -96,7 +99,7 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 				if len(l.Words) == 0 {
 					continue
 				}
-				d.Lines = append(d.Lines, readLine{ID: l.ID, Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: l.Box, Audio: "/media/" + l.Audio, Words: l.Words})
+				d.Lines = append(d.Lines, readLine{ID: l.ID, Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: l.Box, Audio: "/media/" + l.Audio, Words: l.Words, Effect: l.Sound})
 			}
 		}
 		out.Pages = append(out.Pages, d)

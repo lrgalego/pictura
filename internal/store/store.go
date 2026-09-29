@@ -185,7 +185,16 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 	if err := s.addColumn("pages", "reading_image", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumn("pages", "reading_error", "TEXT NOT NULL DEFAULT ''")
+	if err := s.addColumn("pages", "reading_error", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.addColumn("pages", "reading_version", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.addColumn("page_lines", "sound", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.addColumn("page_lines", "seconds", "REAL NOT NULL DEFAULT 0")
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -607,14 +616,18 @@ type Page struct {
 	// by ReplacePageLines and SetReadingError.
 	ReadingImage string
 	ReadingError string
+	// ReadingVersion is how far the reading went: 1 = lettering read, 2 =
+	// sound design done too (pipeline.ReadingVersion is what reading aloud
+	// needs). Pages read before sound design are 1.
+	ReadingVersion int
 }
 
-const pageCols = `id, story_id, number, title, summary, panels_json, image, image_status, image_error, reading_image, reading_error`
+const pageCols = `id, story_id, number, title, summary, panels_json, image, image_status, image_error, reading_image, reading_error, reading_version`
 
 func scanPage(row scanner) (*Page, error) {
 	var p Page
 	var panels string
-	if err := row.Scan(&p.ID, &p.StoryID, &p.Number, &p.Title, &p.Summary, &panels, &p.Image, &p.ImageStatus, &p.ImageError, &p.ReadingImage, &p.ReadingError); err != nil {
+	if err := row.Scan(&p.ID, &p.StoryID, &p.Number, &p.Title, &p.Summary, &panels, &p.Image, &p.ImageStatus, &p.ImageError, &p.ReadingImage, &p.ReadingError, &p.ReadingVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -1226,6 +1239,7 @@ type LineBox struct {
 type LineWord struct {
 	Text  string  `json:"text"`
 	Box   LineBox `json:"box"`
+	Tag   string  `json:"tag,omitempty"` // performed as this vocal (an eleven_v3 audio tag) instead of said
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
 }
@@ -1244,14 +1258,18 @@ type PageLine struct {
 	Exact   bool   // word boxes measured from the ink, not estimated
 	Voice   string // the voice the clip was made with
 	Audio   string // the clip's blob name; "" until voiced
+	// Sound, when set, makes the line a sound effect of that description,
+	// Seconds long, rather than something said.
+	Sound   string
+	Seconds float64
 }
 
-const lineCols = `id, page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio`
+const lineCols = `id, page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds`
 
 func scanLine(row scanner) (*PageLine, error) {
 	var l PageLine
 	var box, words string
-	if err := row.Scan(&l.ID, &l.PageID, &l.Seq, &l.Kind, &l.Speaker, &l.Text, &box, &words, &l.Exact, &l.Voice, &l.Audio); err != nil {
+	if err := row.Scan(&l.ID, &l.PageID, &l.Seq, &l.Kind, &l.Speaker, &l.Text, &box, &words, &l.Exact, &l.Voice, &l.Audio, &l.Sound, &l.Seconds); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(box), &l.Box)
@@ -1303,10 +1321,10 @@ func prefixed(alias, cols string) string {
 	return strings.Join(parts, ", ")
 }
 
-// ReplacePageLines stores a fresh reading of a page drawn as image: the old
-// lines go (their clips are reclaimed by the next Sweep) and the page
-// remembers which art it was read from.
-func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string, lines []*PageLine) error {
+// ReplacePageLines stores a fresh reading of a page drawn as image, at a
+// reading version: the old lines go (clips no line keeps are reclaimed by
+// the next Sweep) and the page remembers which art it was read from.
+func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string, version int, lines []*PageLine) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1318,15 +1336,15 @@ func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string
 	for i, l := range lines {
 		box, _ := json.Marshal(l.Box)
 		words, _ := json.Marshal(orWords(l.Words))
-		res, err := tx.ExecContext(ctx, `INSERT INTO page_lines (page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-			pageID, i, l.Kind, l.Speaker, l.Text, string(box), string(words), l.Exact, l.Voice, l.Audio)
+		res, err := tx.ExecContext(ctx, `INSERT INTO page_lines (page_id, seq, kind, speaker, text, box_json, words_json, exact, voice, audio, sound, seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+			pageID, i, l.Kind, l.Speaker, l.Text, string(box), string(words), l.Exact, l.Voice, l.Audio, l.Sound, l.Seconds)
 		if err != nil {
 			return err
 		}
 		l.ID, _ = res.LastInsertId()
 		l.PageID, l.Seq = pageID, i
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE pages SET reading_image = ?, reading_error = '' WHERE id = ?`, image, pageID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET reading_image = ?, reading_version = ?, reading_error = '' WHERE id = ?`, image, version, pageID); err != nil {
 		return err
 	}
 	return tx.Commit()

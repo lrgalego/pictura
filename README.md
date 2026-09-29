@@ -69,7 +69,12 @@ lettering in reading order with who says each line (checked against the
 script) and rough word boxes; SAM 3.1 boxes every "speech bubble" and
 "caption"; inside each box the ink is split into rows and words by the gaps
 between glyphs, guided by what Spark read, which gives pixel-exact word
-boxes. Each line is voiced once (ElevenLabs reports when every character is
+boxes. A sound-design pass (Muse Spark again, looking at the page) then
+splits each line into speech, vocals the speaker performs (a yawn, a growl,
+a gasp: eleven_v3 audio tags in the speaker's own voice, since "Yaaawn" read
+literally comes out as "Yon!") and sound effects of the world (stomps,
+POOF!, explosions: ElevenLabs' sound-effects model, 0.5–4 s, billed per
+second). Each line is voiced once (ElevenLabs reports when every character is
 spoken) and kept with its clip; redrawing a page re-reads only that page,
 and changing a voice re-voices only that speaker's lines. The player
 (`web/static/reader.js`) moves the highlight from the audio clock.
@@ -118,7 +123,7 @@ shipyard ssh 'cd /opt/pictura && sudo docker compose run --rm --no-deps server -
 | `internal/store` | SQLite (modernc, pure Go): users, sessions, stories, characters, pages, jobs, images |
 | `internal/meta` | Meta Model API client: chat completions with JSON schema, image generations/edits, SAM 3.1 segmentation |
 | `internal/elevenlabs` | ElevenLabs text to speech with per-character timestamps, grouped into words |
-| `internal/pipeline` | prompts, schemas and the `AI` interface; `fake.go` is the offline provider; `voice.go` the voice catalog, casting and the `Speaker` interface (`fakevoice.go` offline); `lettering.go` reads a drawn page's lettering into word boxes (`fakeletters.go` letters the placeholder pages to match) |
+| `internal/pipeline` | prompts, schemas and the `AI` interface; `sounds.go` the sound-design pass (speech / vocal tags / sound effects); `fake.go` is the offline provider; `voice.go` the voice catalog, casting and the `Speaker` interface (`fakevoice.go` offline); `lettering.go` reads a drawn page's lettering into word boxes (`fakeletters.go` letters the placeholder pages to match) |
 | `internal/jobs` | background runner: one job per story, concurrent image drawing, progress for the UI |
 | `internal/pdf` | minimal PDF writer (one JPEG page per comic page) |
 | `web` | routes, auth, handlers; `web/views` templ pages; `web/static/app.css` the brand theme |

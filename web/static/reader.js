@@ -136,12 +136,22 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'reader__hot';
-      b.setAttribute('aria-label', (l.speaker || 'Narrator') + ': ' + l.text);
+      b.setAttribute('aria-label', l.effect ? 'Sound effect: ' + l.text : (l.speaker || 'Narrator') + ': ' + l.text);
       b.title = 'Hear this again';
       place(b, l.box, 0.6);
       b.addEventListener('click', function () { wanted = true; playLine(k); });
       hotspots.appendChild(b);
     });
+  }
+
+  // span is the box around a run of words.
+  function span(words) {
+    var b = { x1: 1, y1: 1, x2: 0, y2: 0 };
+    words.forEach(function (w) {
+      b.x1 = Math.min(b.x1, w.box.x1); b.y1 = Math.min(b.y1, w.box.y1);
+      b.x2 = Math.max(b.x2, w.box.x2); b.y2 = Math.max(b.y2, w.box.y2);
+    });
+    return b;
   }
 
   img.addEventListener('load', function () {
@@ -172,8 +182,14 @@
     hl.hidden = true;
     place(spot, l.box, 1.2);
     spot.hidden = false;
-    who.textContent = l.speaker ? l.speaker + ' says' : 'The narrator';
-    who.className = 'reader__who' + (l.speaker ? '' : ' reader__who--narrator');
+    if (l.effect) {
+      who.textContent = 'Sound effect';
+      who.className = 'reader__who reader__who--effect';
+    } else {
+      who.textContent = l.speaker ? l.speaker + ' says' : 'The narrator';
+      who.className = 'reader__who' + (l.speaker ? '' : ' reader__who--narrator');
+    }
+    hl.classList.toggle('is-effect', !!l.effect);
     zoomTo(l.box);
     audio.src = l.audio;
     audio.playbackRate = rate;
@@ -190,7 +206,17 @@
     raf = 0;
     if (!playing) return;
     var l = page().lines[li];
-    if (l && l.words.length) {
+    if (l && l.effect) {
+      // A sound effect lights all its words at once, for as long as it plays.
+      if (wordIdx !== -2) {
+        wordIdx = -2;
+        place(hl, span(l.words), 0.5);
+        hl.hidden = false;
+        hl.classList.remove('is-pop');
+        void hl.offsetWidth;
+        hl.classList.add('is-pop');
+      }
+    } else if (l && l.words.length) {
       var t = audio.currentTime, idx = -1;
       for (var i = 0; i < l.words.length; i++) {
         if (l.words[i].start <= t + 0.04) idx = i; else break;
@@ -211,7 +237,7 @@
 
   audio.addEventListener('ended', function () {
     var p = page();
-    if (p.lines[li] && p.lines[li].words.length) place(hl, p.lines[li].words[p.lines[li].words.length - 1].box, 0.35);
+    if (p.lines[li] && p.lines[li].words.length && !p.lines[li].effect) place(hl, p.lines[li].words[p.lines[li].words.length - 1].box, 0.35);
     // A short breath between balloons.
     timer = setTimeout(function () {
       if (li + 1 < p.lines.length) playLine(li + 1);

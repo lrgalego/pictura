@@ -13,6 +13,7 @@ import (
 // highlight each word as it is said.
 type Speaker interface {
 	Speak(ctx context.Context, text, voiceID string) (*Speech, error)
+	Sounder
 }
 
 // Speech is one synthesized line.

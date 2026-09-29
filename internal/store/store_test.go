@@ -611,3 +611,28 @@ func TestVoices(t *testing.T) {
 		t.Fatalf("voiceless source replaced the voice: %+v", again)
 	}
 }
+
+func TestLinesCarrySoundsAndTags(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	_, st := seed(t, s)
+	p := &Page{StoryID: st.ID, Number: 1}
+	_ = s.InsertPage(ctx, p)
+	if got, _ := s.Page(ctx, p.ID); got.ReadingVersion != 1 {
+		t.Fatalf("a page starts at reading version 1: %d", got.ReadingVersion)
+	}
+	lines := []*PageLine{
+		{Kind: "bubble", Speaker: "Mara", Words: []LineWord{{Text: "Yaaawn", Tag: "yawns"}, {Text: "night"}}},
+		{Kind: "caption", Words: []LineWord{{Text: "STOMP!"}}, Sound: "a heavy stomp", Seconds: 1.2},
+	}
+	if err := s.ReplacePageLines(ctx, p.ID, "art.png", 2, lines); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.PageLines(ctx, p.ID)
+	if len(got) != 2 || got[0].Words[0].Tag != "yawns" || got[0].Words[1].Tag != "" || got[1].Sound != "a heavy stomp" || got[1].Seconds != 1.2 {
+		t.Fatalf("lines: %+v %+v", got[0], got[1])
+	}
+	if pg, _ := s.Page(ctx, p.ID); pg.ReadingVersion != 2 || pg.ReadingImage != "art.png" {
+		t.Fatalf("page: %+v", pg)
+	}
+}
