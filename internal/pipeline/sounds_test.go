@@ -138,7 +138,7 @@ func TestScriptAndAlignTokens(t *testing.T) {
 		t.Fatalf("owners: %v", owners)
 	}
 	// A run of words performed as one vocal is one tag; a vocal alone gets
-	// the ellipsis eleven_v3 needs.
+	// the ellipsis the voice models need.
 	text, owners = Script([]LetterWord{w("HA", "laughs"), w("HA!", "laughs")})
 	if text != "[laughs]..." || len(owners) != 1 || len(owners[0]) != 2 {
 		t.Fatalf("vocal alone: %q %v", text, owners)

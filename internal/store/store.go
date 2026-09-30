@@ -1247,7 +1247,7 @@ type LineBox struct {
 type LineWord struct {
 	Text  string  `json:"text"`
 	Box   LineBox `json:"box"`
-	Tag   string  `json:"tag,omitempty"` // performed as this vocal (an eleven_v3 audio tag) instead of said
+	Tag   string  `json:"tag,omitempty"` // performed as this vocal (an ElevenLabs audio tag) instead of said
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
 }
@@ -1270,7 +1270,7 @@ type PageLine struct {
 	// Seconds long, rather than something said.
 	Sound   string
 	Seconds float64
-	// Delivery is how a spoken line is said, as an eleven_v3 audio tag
+	// Delivery is how a spoken line is said, as an ElevenLabs audio tag
 	// ("whispers", "excited"); empty is the voice's own read.
 	Delivery string
 	// Direction is the writer's last note for this line, kept to show it.

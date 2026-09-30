@@ -1144,7 +1144,7 @@ func TestSplitLine(t *testing.T) {
 	}
 }
 
-// tagShy fails, like eleven_v3 sometimes does, on lines that are only an
+// tagShy fails, like eleven_v3 sometimes did, on lines that are only an
 // audio tag.
 type tagShy struct{ countingVoice }
 

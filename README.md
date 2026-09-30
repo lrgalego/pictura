@@ -54,7 +54,10 @@ Voices come from **ElevenLabs** (Meta's Model API has speech-to-text but no
 speech synthesis): `ELEVENLABS_API_KEY`, resolved in development from
 `op://pictura/elevenlabs-api-dev` by `.env.dev.tpl` (a restricted key: text
 to speech, voices read, forced alignment, models, user). The default model
-is `eleven_v3`, the most expressive; `ELEVENLABS_MODEL` overrides it.
+is `eleven_v4_turbo`: it acts every line and tag we checked as `eleven_v3`
+does, about twice as fast, half a credit per character instead of one, and it performs vocal
+tags eleven_v3 sometimes left near silent. `ELEVENLABS_MODEL` overrides it
+(e.g. `eleven_v4`, the full model, at one credit per character).
 Without a key, or with `--fake-ai`, voices are placeholder tones, one per
 word, timed like real speech. Production resolves its own key,
 `op://pictura/elevenlabs-api`, through `.env.production.tpl`. Both keys
@@ -71,7 +74,7 @@ script) and rough word boxes; SAM 3.1 boxes every "speech bubble" and
 between glyphs, guided by what Spark read, which gives pixel-exact word
 boxes. A sound-design pass (Muse Spark again, looking at the page) then
 splits each line into speech, vocals the speaker performs (a yawn, a growl,
-a gasp: eleven_v3 audio tags in the speaker's own voice, since "Yaaawn" read
+a gasp: ElevenLabs audio tags in the speaker's own voice, since "Yaaawn" read
 literally comes out as "Yon!") and sound effects of the world (stomps,
 POOF!, explosions: ElevenLabs' sound-effects model, 0.5–4 s, billed per
 second). Each line is voiced once (ElevenLabs reports when every character is

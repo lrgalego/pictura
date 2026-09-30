@@ -21,9 +21,12 @@ import (
 
 const (
 	DefaultBaseURL = "https://api.elevenlabs.io/v1"
-	// DefaultModel is the most expressive model: it acts out ellipses,
-	// exclamations and questions, which suits stories read to children.
-	DefaultModel = "eleven_v3"
+	// DefaultModel acts out ellipses, exclamations, questions and audio
+	// tags, which suits stories read to children. Eleven v4 Turbo is billed
+	// half a credit per character (eleven_v3 and eleven_v4 bill one), is
+	// about twice as fast, and performs vocal tags eleven_v3 sometimes left
+	// near silent ("[snores]...").
+	DefaultModel = "eleven_v4_turbo"
 	// DefaultFormat is the output format: MP3 plays in every browser.
 	DefaultFormat = "mp3_44100_128"
 )
@@ -42,7 +45,7 @@ type Client struct {
 }
 
 // transient marks a failure worth another attempt: the network, a rate
-// limit, a server error, or a 200 that carried no audio (eleven_v3 does
+// limit, a server error, or a 200 that carried no audio (eleven_v3 did
 // that now and then, e.g. for a line that is only "[snores]...").
 type transient struct{ error }
 

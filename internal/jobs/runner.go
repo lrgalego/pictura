@@ -1191,7 +1191,7 @@ func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine
 	text, owners := pipeline.ScriptWith(l.Delivery, lettered)
 	sp, err := r.Voice.Speak(ctx, text, voice)
 	if tag, only := pipeline.OnlyVocal(lettered); err != nil && only {
-		// eleven_v3 sometimes returns nothing for a line that is only an
+		// The voice model can return nothing for a line that is only an
 		// audio tag ("[snores]..."), retries included. Make the sound with
 		// the sound-effects model instead; the line counts as voiced.
 		secs := pipeline.VocalSeconds(len(l.Words))
