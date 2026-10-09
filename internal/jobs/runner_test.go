@@ -351,6 +351,9 @@ func TestBreakdownAndPageRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.mustDone("adjust page")
+	if j, _ := e.st.LatestJob(e.ctx, e.sto.ID); j.Kind != "page" || j.PageID != pages[0].ID {
+		t.Fatalf("a page revision names its page: %+v", j)
+	}
 	p0, _ := e.st.Page(e.ctx, pages[0].ID)
 	if p0.ImageStatus != store.ImagePending || !strings.Contains(p0.Summary, "revised: more rain") {
 		t.Fatalf("adjust page: %+v", p0)

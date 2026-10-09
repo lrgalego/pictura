@@ -103,18 +103,30 @@ type reporter func(progress, total int, message string)
 
 // start queues a story-level job.
 func (r *Runner) start(storyID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
-	return r.enqueue(storyID, 0, kind, message, total, fn)
+	return r.enqueue(storyID, 0, 0, kind, message, total, fn)
+}
+
+// startPage queues a story-level job that works on one page, so that page
+// can show the work while it runs and when it lands.
+func (r *Runner) startPage(storyID, pageID int64, kind, message string, fn func(ctx context.Context, report reporter) error) error {
+	return r.enqueue(storyID, 0, pageID, kind, message, 0, fn)
 }
 
 // startChar queues a character-level job.
 func (r *Runner) startChar(storyID, charID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
-	return r.enqueue(storyID, charID, kind, message, total, fn)
+	return r.enqueue(storyID, charID, 0, kind, message, total, fn)
 }
 
-func (r *Runner) enqueue(storyID, charID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
+func (r *Runner) enqueue(storyID, charID, pageID int64, kind, message string, total int, fn func(ctx context.Context, report reporter) error) error {
 	job, err := r.st.CreateJob(context.Background(), storyID, charID, kind, message, total)
 	if err != nil {
 		return err
+	}
+	if pageID != 0 {
+		if err := r.st.SetJobPage(context.Background(), job.ID, pageID); err != nil {
+			return err
+		}
+		job.PageID = pageID
 	}
 	r.mu.Lock()
 	r.queues[storyID] = append(r.queues[storyID], &task{job: job, kind: kind, charID: charID, fn: fn})
@@ -745,7 +757,7 @@ func samePlan(old *store.Page, s pipeline.PageSpec) bool {
 
 // AdjustPage revises one page's plan from feedback.
 func (r *Runner) AdjustPage(storyID, pageID int64, feedback string) error {
-	return r.start(storyID, "page", "Revising the page…", 0, func(ctx context.Context, report reporter) error {
+	return r.startPage(storyID, pageID, "page", "Revising the page…", func(ctx context.Context, report reporter) error {
 		story, err := r.st.Story(ctx, storyID)
 		if err != nil {
 			return err

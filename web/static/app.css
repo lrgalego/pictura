@@ -302,6 +302,9 @@ h1, h2, h3, .display {
 
 /* ---------- job bar ---------- */
 .job { padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.5rem; }
+/* A story-wide job stays in sight under the top bar while it runs, so
+   "Adjust all pages" pressed at the bottom of a long storyboard shows too. */
+.job--sticky { position: sticky; top: calc(3.75rem + 0.75rem); z-index: 10; }
 .job__row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .job__title { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; }
 .job__hint { color: var(--muted-foreground); font-size: var(--text-sm); }
@@ -355,6 +358,49 @@ h1, h2, h3, .display {
 .pn__desc { margin: 0; line-height: 1.45; }
 .pn__setting { margin: 0; font-size: 0.8rem; color: var(--muted-foreground); }
 .pn__sfx { align-self: flex-start; font-family: var(--font-display); font-weight: 800; font-style: italic; letter-spacing: 0.04em; color: var(--primary); transform: rotate(-2deg); }
+
+/* A page whose revision runs says so on the card itself: the job bar at the
+   top is usually scrolled away by the time the writer asked for a change. */
+.pg { transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard); }
+.pg--working { border-color: var(--primary); box-shadow: 6px 6px 0 var(--primary); }
+/* The panels being rewritten carry aria-busy, which the design system
+   already fades; the summary above them fades with them. */
+.pg--working .pg__summary { opacity: var(--motion-busy-opacity); }
+.pg--working .panels { position: relative; pointer-events: none; filter: saturate(0.5); }
+/* A light sweeps across the panels while the editor works on them. */
+.pg--working .panels::after {
+  content: ""; position: absolute; inset: 0; border-radius: 4px;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--primary) 22%, transparent) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: pg-sweep 1.6s linear infinite;
+}
+@keyframes pg-sweep { from { background-position: 125% 0; } to { background-position: -125% 0; } }
+.pg__working {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.3rem 0.75rem; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--pop); color: #221b3a;
+  font-family: var(--font-display); font-weight: 700; font-size: var(--text-sm);
+}
+/* When it lands: the card stamps in with a ring of colour, the panels rise
+   in one after another, and a "Revised" stamp stays on it for a while. */
+.pg--revised { animation: pg-land 1.8s var(--ease-standard); }
+@keyframes pg-land {
+  0%, 35% { background: color-mix(in oklab, var(--pop) 45%, var(--card)); box-shadow: 6px 6px 0 var(--primary), 0 0 0 8px color-mix(in oklab, var(--pop) 80%, transparent); }
+  100% { background: var(--card); box-shadow: 6px 6px 0 var(--ink), 0 0 0 20px transparent; }
+}
+.pg--revised .pn { animation: var(--motion-enter) var(--motion-base) var(--ease-enter) both; animation-delay: calc(var(--i, 0) * var(--motion-stagger) * 2); }
+.pg__revised {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.6rem; border: 2px solid var(--ink); border-radius: 4px;
+  background: var(--pop); color: #221b3a; rotate: -3deg;
+  font-family: var(--font-display); font-weight: 800; font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.04em;
+  animation: stamp var(--motion-base) var(--ease-spring) both;
+}
+.pg__revised svg { width: 0.95rem; height: 0.95rem; }
+@media (prefers-reduced-motion: reduce) {
+  .pg--working .panels::after { animation: none; background: color-mix(in oklab, var(--primary) 8%, transparent); }
+  .pg--revised { animation-duration: 0.6s; }
+}
 .pn__cast { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 .pn__line { background: #fff; color: #221b3a; border: 2px solid #221b3a; border-radius: 1rem; padding: 0.3rem 0.65rem; font-family: var(--font-display); font-weight: 600; }
 .pn__line b { color: var(--primary); font-weight: 800; }

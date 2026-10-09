@@ -261,7 +261,7 @@ templ stepItem(st *store.Story, n int, label string, current int) {
 // it failed, what failed and the way to start it again from this step.
 templ JobBar(st *store.Story, j *store.Job, step int) {
 	if j.Active() {
-		<div class="panel panel--soft job" role="status" data-motion-enter="pop">
+		<div class={ "panel panel--soft job", templ.KV("job--sticky", j.PageID == 0) } role="status" data-motion-enter="pop">
 			<div class="job__row">
 				@components.Spinner("", "")
 				if j.Queued() {
@@ -539,7 +539,7 @@ templ PagesPanel(v PagesView) {
 			@pagesToolbar(v, false)
 			<div class="pages" data-motion-stagger="rise">
 				for _, p := range v.Pages {
-					@pageCard(v.Story, p, v.Job.Active())
+					@pageCard(v.Story, p, v.Job.Active(), pageState(v.Job, p))
 				}
 			</div>
 			@pagesToolbar(v, true)
@@ -574,12 +574,25 @@ templ pagesToolbar(v PagesView, bottom bool) {
 	</div>
 }
 
-templ pageCard(st *store.Story, p *store.Page, busy bool) {
-	<article class="panel pg" id={ fmt.Sprintf("page-%d", p.ID) }>
+// pageCard is one page of the storyboard. While the writer's revision of
+// it runs, the card itself says so (the job bar is often scrolled out of
+// sight by then); when the revision lands, the card flashes and its panels
+// rise in, so the change is easy to spot.
+templ pageCard(st *store.Story, p *store.Page, busy bool, state string) {
+	<article
+		class={ "panel pg", templ.KV("pg--working", state == pageWorking || state == pageQueued), templ.KV("pg--revised", state == pageRevised) }
+		id={ fmt.Sprintf("page-%d", p.ID) }
+	>
 		<div class="pg__head">
 			<span class="pg__num">{ fmt.Sprintf("Page %d", p.Number) }</span>
 			if !genericTitle(p) {
 				<h2 class="pg__title">{ p.Title }</h2>
+			}
+			if state == pageRevised {
+				<span class="pg__revised" role="status">
+					@components.IconCheck()
+					Revised
+				</span>
 			}
 			if p.ImageStatus == store.ImageReady {
 				@components.Badge(components.BadgeSuccess, nil) {
@@ -591,23 +604,39 @@ templ pageCard(st *store.Story, p *store.Page, busy bool) {
 				}
 			}
 			<div class="pg__actions">
-				@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/pages/%d/adjust", base(st), p.ID), Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy}}) {
-					@components.IconPencil()
-					Adjust
+				if state == pageWorking || state == pageQueued {
+					<span class="pg__working" role="status">
+						@components.Spinner("", "")
+						if state == pageQueued {
+							Waiting its turn…
+						} else {
+							Revising this page…
+						}
+					</span>
+				} else {
+					@components.DialogTrigger(components.DialogTriggerProps{URL: fmt.Sprintf("%s/pages/%d/adjust", base(st), p.ID), Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy}}) {
+						@components.IconPencil()
+						Adjust
+					}
 				}
 			</div>
 		</div>
 		<p class="pg__summary">{ p.Summary }</p>
-		<div class="panels">
-			for _, pn := range p.Panels {
-				@panelCard(pn)
+		<div
+			class="panels"
+			if state == pageWorking || state == pageQueued {
+				aria-busy="true"
+			}
+		>
+			for i, pn := range p.Panels {
+				@panelCard(pn, i)
 			}
 		</div>
 	</article>
 }
 
-templ panelCard(pn store.Panel) {
-	<div class="pn">
+templ panelCard(pn store.Panel, i int) {
+	<div class="pn" style={ fmt.Sprintf("--i: %d", i) }>
 		<div class="pn__head">
 			<span class="pn__num">{ fmt.Sprintf("Panel %d", pn.Number) }</span>
 			if pn.Shot != "" {

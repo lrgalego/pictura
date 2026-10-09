@@ -373,6 +373,12 @@ func TestPagesAndBookFlows(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Revising page 1") {
 		t.Fatalf("page adjust: %d", resp.StatusCode)
 	}
+	if card := pageCardHTML(body, pid); !strings.Contains(card, "pg--working") || !strings.Contains(card, `aria-busy="true"`) || !strings.Contains(card, "Revising this page") || strings.Contains(card, "/adjust") {
+		t.Fatalf("the page being revised says so on its own card, in place of its Adjust button:\n%s", card)
+	}
+	if strings.Contains(body, "job--sticky") {
+		t.Fatal("a page's own revision leaves the job bar in place; the card shows it")
+	}
 	resp, body = e.post(base+"/pages/"+pid+"/adjust", url.Values{"feedback": {"again"}}, true)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Waiting its turn") {
 		t.Fatal("a second page adjustment queues behind the first")
@@ -382,6 +388,9 @@ func TestPagesAndBookFlows(t *testing.T) {
 	_, body = e.get(base + "/pages")
 	if !strings.Contains(body, "Will be redrawn") || !strings.Contains(body, "Draw the changed pages") || !strings.Contains(body, "revised: again") {
 		t.Fatal("both adjustments applied in order and the page is marked for redraw")
+	}
+	if card := pageCardHTML(body, pid); !strings.Contains(card, "pg--revised") || !strings.Contains(card, "Revised") || strings.Contains(card, "pg--working") || !strings.Contains(card, `style="--i: 0;"`) {
+		t.Fatalf("the revised page lands with its flash, its stamp and staggered panels:\n%s", card)
 	}
 
 	// Whole-plan adjust: dialog, empty, run, busy.
@@ -400,6 +409,9 @@ func TestPagesAndBookFlows(t *testing.T) {
 	}
 	if !strings.Contains(body, "Revising the pages") || !strings.Contains(body, `hx-trigger="every 2s"`) {
 		t.Fatal("the panel polls while the plan is revised")
+	}
+	if !strings.Contains(body, "job--sticky") || strings.Contains(body, "pg--working") {
+		t.Fatal("a story-wide job keeps its bar in sight; no single page claims it")
 	}
 	e.release()
 	e.waitIdle()
@@ -758,6 +770,17 @@ func allRefIDs(body string) []string {
 		rest = rest[i+len(`id="ref-`):]
 		out = append(out, rest[:strings.Index(rest, `"`)])
 	}
+}
+
+// pageCardHTML is the storyboard card of one page in a rendered body.
+func pageCardHTML(body, pageID string) string {
+	i := strings.Index(body, `id="page-`+pageID+`"`)
+	if i < 0 {
+		return ""
+	}
+	start := strings.LastIndex(body[:i], "<article")
+	end := strings.Index(body[i:], "</article>")
+	return body[start : i+end]
 }
 
 // failJob records a failed story-level job of the given kind, the way the

@@ -389,6 +389,17 @@ func TestJobs(t *testing.T) {
 	// Character jobs are tracked apart from story-level ones.
 	c := &Character{StoryID: st.ID, Name: "Pip"}
 	_ = s.InsertCharacter(ctx, c)
+	pj, _ := s.CreateJob(ctx, st.ID, 0, "page", "Revising the page…", 0)
+	if err := s.SetJobPage(ctx, pj.ID, 42); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.LatestJob(ctx, st.ID); got.ID != pj.ID || got.PageID != 42 || got.CharacterID != 0 {
+		t.Fatalf("a page job is story-level and names its page: %+v", got)
+	}
+	if j2, _ := s.Job(ctx, j2.ID); j2.PageID != 0 {
+		t.Fatal("other jobs name no page")
+	}
+	_ = s.FinishJob(ctx, pj.ID, "")
 	cj, _ := s.CreateJob(ctx, st.ID, c.ID, "sheet", "Revising…", 0)
 	if running, _ := s.AnyRunning(ctx, st.ID); !running {
 		t.Fatal("a queued character job counts as running")

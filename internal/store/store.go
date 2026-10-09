@@ -170,6 +170,9 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 	if err := s.addColumn("jobs", "character_id", "INTEGER"); err != nil {
 		return err
 	}
+	if err := s.addColumn("jobs", "page_id", "INTEGER"); err != nil {
+		return err
+	}
 	if err := s.addColumn("users", "enabled", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -730,6 +733,7 @@ type Job struct {
 	ID          int64
 	StoryID     int64
 	CharacterID int64 // 0 = a story-level job; otherwise the one character it works on
+	PageID      int64 // a story-level job working on one page (revising its plan); 0 otherwise
 	Kind        string
 	Status      string
 	Progress    int
@@ -748,12 +752,12 @@ func (j *Job) Queued() bool { return j != nil && j.Status == JobQueued }
 // Active is queued or running: the UI keeps polling while any job is active.
 func (j *Job) Active() bool { return j.Queued() || j.Running() }
 
-const jobCols = `id, story_id, COALESCE(character_id, 0), kind, status, progress, total, message, error, created_at, updated_at`
+const jobCols = `id, story_id, COALESCE(character_id, 0), COALESCE(page_id, 0), kind, status, progress, total, message, error, created_at, updated_at`
 
 func scanJob(row scanner) (*Job, error) {
 	var j Job
 	var c, u string
-	if err := row.Scan(&j.ID, &j.StoryID, &j.CharacterID, &j.Kind, &j.Status, &j.Progress, &j.Total, &j.Message, &j.Error, &c, &u); err != nil {
+	if err := row.Scan(&j.ID, &j.StoryID, &j.CharacterID, &j.PageID, &j.Kind, &j.Status, &j.Progress, &j.Total, &j.Message, &j.Error, &c, &u); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -774,6 +778,13 @@ func (s *Store) CreateJob(ctx context.Context, storyID, characterID int64, kind,
 	}
 	id, _ := res.LastInsertId()
 	return s.Job(ctx, id)
+}
+
+// SetJobPage records the one page a story-level job works on, so the page
+// can show it.
+func (s *Store) SetJobPage(ctx context.Context, id, pageID int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET page_id = ? WHERE id = ?`, nullable(pageID), id)
+	return err
 }
 
 func (s *Store) Job(ctx context.Context, id int64) (*Job, error) {

@@ -134,6 +134,15 @@ func newPage(t *testing.T) playwright.Page {
 	return page
 }
 
+// shot saves a screenshot of one element under E2E_SHOTS, to look at a
+// state the assertions only describe.
+func shot(t *testing.T, l playwright.Locator, name string) {
+	t.Helper()
+	if dir := os.Getenv("E2E_SHOTS"); dir != "" {
+		_, _ = l.Screenshot(playwright.LocatorScreenshotOptions{Path: playwright.String(filepath.Join(dir, name+".png"))})
+	}
+}
+
 func goto_(t *testing.T, page playwright.Page, url string) {
 	t.Helper()
 	if _, err := page.Goto(url); err != nil {
@@ -309,7 +318,17 @@ func TestScriptToComic(t *testing.T) {
 	must(t, page.Fill("#feedback", "more rain"))
 	must(t, page.Click(".dialog button:has-text('Revise page')"))
 	must(t, expect.Locator(page.Locator(".dialog")).ToHaveCount(0))
-	must(t, expect.Locator(page.Locator(".pg").First()).ToContainText("revised: more rain"))
+	// The card itself shows the work in place of its Adjust button, then
+	// lands stamped "Revised".
+	first := page.Locator(".pg").First()
+	must(t, expect.Locator(first).ToHaveClass(regexp.MustCompile(`pg--working`)))
+	must(t, expect.Locator(first.Locator(".pg__working")).ToContainText("Revising this page"))
+	must(t, expect.Locator(first.Locator("button:has-text('Adjust')")).ToHaveCount(0))
+	shot(t, first, "revise-working")
+	must(t, expect.Locator(first).ToHaveClass(regexp.MustCompile(`pg--revised`)))
+	must(t, expect.Locator(first.Locator(".pg__revised")).ToContainText("Revised"))
+	must(t, expect.Locator(first).ToContainText("revised: more rain"))
+	shot(t, first, "revise-landed")
 
 	// Draw the pages and read the comic.
 	must(t, page.Locator("button:has-text('Draw the pages')").First().Click())

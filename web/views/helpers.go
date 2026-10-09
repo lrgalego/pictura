@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lrgalego/pictura/internal/store"
 )
@@ -194,4 +195,32 @@ func jobRetry(st *store.Story, j *store.Job, step int) (retryAction, bool) {
 		return retryAction{URL: base(st) + "/read/prepare", Label: "Try reading aloud again"}, true
 	}
 	return retryAction{}, false
+}
+
+// Page states on the storyboard while the writer revises one page.
+const (
+	pageIdle    = ""
+	pageQueued  = "queued"  // its revision waits for another job
+	pageWorking = "working" // its revision is running
+	pageRevised = "revised" // its revision just landed
+)
+
+// revisedFor is how long a page that was just revised says so.
+const revisedFor = 2 * time.Minute
+
+// pageState is what the storyboard shows on a page for the latest job: a
+// revision of that page queued, running, or just finished.
+func pageState(j *store.Job, p *store.Page) string {
+	if j == nil || j.PageID != p.ID {
+		return pageIdle
+	}
+	switch {
+	case j.Queued():
+		return pageQueued
+	case j.Running():
+		return pageWorking
+	case j.Status == store.JobDone && time.Since(j.UpdatedAt) < revisedFor:
+		return pageRevised
+	}
+	return pageIdle
 }
