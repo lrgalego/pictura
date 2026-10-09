@@ -176,6 +176,64 @@ func TestLayWords(t *testing.T) {
 	}
 }
 
+// sliverPage is blank paper with one thin dark stroke inside where Spark
+// read "SLAM!" (100..200 x 100..150 of 1000): ink that measures cleanly
+// but is a stroke of one letter, as on outlined lettering over busy art.
+func sliverPage() *image.Gray {
+	g := image.NewGray(image.Rect(0, 0, 1000, 1000))
+	for i := range g.Pix {
+		g.Pix[i] = 255
+	}
+	for y := 105; y < 145; y++ {
+		for x := 150; x < 156; x++ {
+			g.Pix[y*1000+x] = 0
+		}
+	}
+	return g
+}
+
+func TestArtLetteringNeverShrinksToASliver(t *testing.T) {
+	sl := []sparkLine{{Kind: "sfx", Text: "SLAM!", Words: []sparkWord{{"SLAM!", 100, 100, 200, 150}}}}
+	out := layout(sliverPage(), sl, nil, nil, &store.Page{})
+	if len(out) != 1 || out[0].Exact {
+		t.Fatalf("a sliver is not the lettering: %+v", out)
+	}
+	if b := out[0].Box; b.X1 > 0.1 || b.Y1 > 0.1 || b.X2 < 0.2 || b.Y2 < 0.15 {
+		t.Fatalf("the line box must cover Spark's reading: %+v", b)
+	}
+	if b := out[0].Words[0].Box; b.X2-b.X1 < 0.09 {
+		t.Fatalf("the word box must not be the sliver: %+v", b)
+	}
+	// Any kind: ink measured into much less than Spark's reading is dropped.
+	sl[0].Kind = "bubble"
+	if out := layout(sliverPage(), sl, nil, nil, &store.Page{}); out[0].Exact {
+		t.Fatalf("a bubble's sliver: %+v", out[0])
+	}
+}
+
+func TestRemeasureRepairsAStoredSliver(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, sliverPage()); err != nil {
+		t.Fatal(err)
+	}
+	// The older measure kept the stroke as the word; the line box was right.
+	stored := []LetterLine{{Kind: "sfx", Text: "SLAM!", Box: Box{0.1, 0.1, 0.2, 0.15}, Exact: true,
+		Words: []LetterWord{{Text: "SLAM!", Box: Box{0.15, 0.105, 0.156, 0.145}}}}}
+	out, err := Remeasure(context.Background(), empty{}, buf.Bytes(), stored)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("remeasure: %+v %v", out, err)
+	}
+	if b := out[0].Box; b.X1 > 0.1 || b.X2 < 0.2 || b.Y1 > 0.1 || b.Y2 < 0.15 {
+		t.Fatalf("line box shrank: %+v", b)
+	}
+	if b := out[0].Words[0].Box; b.X2-b.X1 < 0.09 || out[0].Text != "SLAM!" {
+		t.Fatalf("word still a sliver: %+v", out[0].Words[0])
+	}
+	if _, err := Remeasure(context.Background(), empty{}, []byte("not a png"), stored); err == nil {
+		t.Fatal("an unreadable page must fail")
+	}
+}
+
 func TestMatchKeepsArtLetteringOutOfBubbles(t *testing.T) {
 	lines := []sparkLine{
 		{Kind: "sfx", Words: []sparkWord{{"SLAM!", 100, 100, 300, 160}}},

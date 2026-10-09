@@ -171,6 +171,29 @@ func Remeasure(ctx context.Context, ai AI, png []byte, lines []LetterLine) ([]Le
 				sl.Words = append(sl.Words, sparkWord{w.Text, int(math.Round(w.Box.X1 * 1000)), int(math.Round(w.Box.Y1 * 1000)), int(math.Round(w.Box.X2 * 1000)), int(math.Round(w.Box.Y2 * 1000))})
 			}
 		}
+		// The stored words are the older measure, not Spark's reading. On
+		// lettering over the art it sometimes kept a stroke of one letter;
+		// the line's own box was right, so the words are spread across it
+		// again, by their lengths.
+		if k := sl.Kind; (k == "sfx" || k == "title") && len(sl.Words) > 0 {
+			lb := lines[i].Box
+			u := Box{1, 1, 0, 0}
+			for _, w := range sl.Words {
+				u = boxUnion(u, sparkBox(w))
+			}
+			if boxArea(u) < 0.4*boxArea(lb) {
+				total := 0.0
+				for _, w := range sl.Words {
+					total += weight(w.W)
+				}
+				acc := lb.X1
+				for wi, w := range sl.Words {
+					wv := (lb.X2 - lb.X1) * weight(w.W) / total
+					sl.Words[wi] = sparkWord{w.W, int(math.Round(acc * 1000)), int(math.Round(lb.Y1 * 1000)), int(math.Round((acc + wv) * 1000)), int(math.Round(lb.Y2 * 1000))}
+					acc += wv
+				}
+			}
+		}
 		if len(sl.Words) > 0 && !blank {
 			units = append(units, unit{i, j})
 			reads = append(reads, sl)
@@ -243,7 +266,7 @@ func layout(g *image.Gray, lines []sparkLine, regions []Region, chars []*store.C
 		} else {
 			// No bubble or caption box (titles, lettering straight on the
 			// art): measure around where Spark saw it. Only a reading the
-			// ink agrees with is kept; the line box stays Spark's.
+			// ink agrees with is kept.
 			measured = measureLine(g, sparkRegion(l.Words, W, H), l.Words)
 			// On busy art (outlined lettering over a drawing) the ink can
 			// be a sliver of an outline; Spark's height, if not its place,
@@ -260,6 +283,19 @@ func layout(g *image.Gray, lines []sparkLine, regions []Region, chars []*store.C
 				}
 			}
 		}
+		spark := sparkUnion(l.Words)
+		// Spark's boxes drift but are about the right size: ink measured
+		// into much less than that is a fragment (a stroke of one letter),
+		// not the line.
+		if measured != nil {
+			u := Region{math.MaxInt, math.MaxInt, math.MinInt, math.MinInt}
+			for _, r := range measured {
+				u = Region{min(u.X1, r.X1), min(u.Y1, r.Y1), max(u.X2, r.X2), max(u.Y2, r.Y2)}
+			}
+			if float64(area(u)) < 0.4*boxArea(spark)*W*H {
+				measured = nil
+			}
+		}
 		// Spark lists the words in reading order; its boxes only place
 		// them roughly, so they never reorder them.
 		for wi, w := range l.Words {
@@ -274,12 +310,16 @@ func layout(g *image.Gray, lines []sparkLine, regions []Region, chars []*store.C
 			line.Words = snapInto(line.Words, regionBox(*region, W, H))
 		}
 		line.Exact = measured != nil
-		if region != nil {
+		switch {
+		case region != nil:
 			// The lettering can spill a little past SAM's box (it is
 			// measured just beyond it): the line holds both.
-			r, u := regionBox(*region, W, H), unionBox(line.Words)
-			line.Box = Box{math.Min(r.X1, u.X1), math.Min(r.Y1, u.Y1), math.Max(r.X2, u.X2), math.Max(r.Y2, u.Y2)}
-		} else {
+			line.Box = boxUnion(regionBox(*region, W, H), unionBox(line.Words))
+		case l.Kind == "sfx" || l.Kind == "title":
+			// Lettering on the art lights up as a whole: its box is never
+			// smaller than where Spark read it, whatever the ink says.
+			line.Box = padBox(boxUnion(spark, unionBox(line.Words)), 0.006)
+		default:
 			line.Box = padBox(unionBox(line.Words), 0.006)
 		}
 		texts := make([]string, len(line.Words))
@@ -311,6 +351,21 @@ func sparkBox(w sparkWord) Box {
 	c := func(v int) float64 { return math.Max(0, math.Min(1, float64(v)/1000)) }
 	return Box{c(w.X1), c(w.Y1), c(w.X2), c(w.Y2)}
 }
+
+// sparkUnion is the box around a line's words as Spark read them.
+func sparkUnion(ws []sparkWord) Box {
+	u := Box{1, 1, 0, 0}
+	for _, w := range ws {
+		u = boxUnion(u, sparkBox(w))
+	}
+	return u
+}
+
+func boxUnion(a, b Box) Box {
+	return Box{math.Min(a.X1, b.X1), math.Min(a.Y1, b.Y1), math.Max(a.X2, b.X2), math.Max(a.Y2, b.Y2)}
+}
+
+func boxArea(b Box) float64 { return math.Max(0, b.X2-b.X1) * math.Max(0, b.Y2-b.Y1) }
 
 func padBox(b Box, p float64) Box {
 	return Box{math.Max(0, b.X1-p), math.Max(0, b.Y1-p), math.Min(1, b.X2+p), math.Min(1, b.Y2+p)}
