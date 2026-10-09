@@ -616,6 +616,9 @@ templ panelCard(pn store.Panel) {
 				}
 			}
 		</div>
+		if pn.Setting != "" {
+			<p class="pn__setting">{ pn.Setting }</p>
+		}
 		<p class="pn__desc">{ pn.Description }</p>
 		if len(pn.Characters) > 0 {
 			<div class="pn__cast">
@@ -631,6 +634,9 @@ templ panelCard(pn store.Panel) {
 		}
 		for _, l := range pn.Dialogue {
 			<div class="pn__line"><b>{ l.Character }:</b> { l.Text }</div>
+		}
+		if pn.SFX != "" {
+			<div class="pn__sfx">{ pn.SFX }</div>
 		}
 	</div>
 }

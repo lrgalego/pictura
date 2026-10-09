@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -26,15 +27,41 @@ func TestStyles(t *testing.T) {
 	}
 }
 
-func TestSuggestPages(t *testing.T) {
-	if n := suggestPages("a few words"); n != 3 {
-		t.Fatalf("min 3, got %d", n)
+func TestPageRange(t *testing.T) {
+	if lo, hi := pageRange("a few words"); lo != 3 || hi != 5 {
+		t.Fatalf("a tiny script still gets 3 to 5 pages, got %d-%d", lo, hi)
 	}
-	if n := suggestPages(strings.Repeat("word ", 600)); n != 5 {
-		t.Fatalf("600 words ~ 5 pages, got %d", n)
+	// 140 short lines of dialogue: far more panels than 280 words suggest.
+	chatty := strings.Repeat(`"Wait." Tom frowned. `, 70)
+	if b := beats(chatty); b != 140 {
+		t.Fatalf("every sentence and line is a beat, got %d", b)
 	}
-	if n := suggestPages(strings.Repeat("word ", 5000)); n != 16 {
-		t.Fatalf("max 16, got %d", n)
+	if lo, hi := pageRange(chatty); lo != 4 || hi != 7 {
+		t.Fatalf("140 beats ~ 4 to 7 pages, got %d-%d", lo, hi)
+	}
+	if lo, hi := pageRange("MARA: Hello?\nPIP: Please don't scream\n\n- Run!"); beats("MARA: Hello?\nPIP: Please don't scream\n\n- Run!") != 3 || lo != 3 || hi != 5 {
+		t.Fatalf("lines without end punctuation count too, got %d-%d", lo, hi)
+	}
+	if lo, hi := pageRange(strings.Repeat("Word word. ", 5000)); lo != 24 || hi != 24 {
+		t.Fatalf("capped at 24, got %d-%d", lo, hi)
+	}
+}
+
+func TestPageCast(t *testing.T) {
+	cast := []*store.Character{{Name: "Ash"}, {Name: "Tom"}, {Name: "Mr. Y"}, {Name: "Ms. Y"}}
+	page := &store.Page{Panels: []store.Panel{
+		{Characters: []string{"Mr. Y", "ash"}, Dialogue: []store.Line{{Character: "Mr. Y", Text: "Hi"}, {Character: "Voice", Text: "Boo"}}},
+		{Characters: []string{"Mr. Y"}},
+	}}
+	got := PageCast(cast, page, 8)
+	if len(got) != 2 || got[0].Name != "Mr. Y" || got[1].Name != "Ash" {
+		t.Fatalf("the most present first, nobody absent: %+v", got)
+	}
+	if got := PageCast(cast, page, 1); len(got) != 1 || got[0].Name != "Mr. Y" {
+		t.Fatalf("capped to the most present: %+v", got)
+	}
+	if got := PageCast(cast, &store.Page{}, 3); len(got) != 3 || got[0].Name != "Ash" {
+		t.Fatalf("no names: the cast in order, capped: %+v", got)
 	}
 }
 
@@ -56,11 +83,11 @@ func TestSheetPrompt(t *testing.T) {
 
 func TestPagePrompt(t *testing.T) {
 	page := &store.Page{Number: 1, Title: "The Climb", Panels: []store.Panel{
-		{Number: 1, Shot: "wide", Description: "Mara climbs", Characters: []string{"Mara"}, Caption: "Rain hammered.", Dialogue: []store.Line{{Character: "Mara", Text: "Hello?"}}},
-		{Number: 2, Shot: "close-up", Description: "She listens"},
+		{Number: 1, Shot: "wide", Setting: "lighthouse stairs, storm light.", Description: "Mara climbs", Characters: []string{"Mara"}, Caption: "Rain hammered.", Dialogue: []store.Line{{Character: "Mara", Text: "Hello?"}, {Character: "Deep Voice", Text: "Go back."}}, SFX: "CRASH!"},
+		{Number: 2, Shot: "close-up", Description: "She listens."},
 	}}
 	p := PagePrompt(story(), []*store.Character{mara()}, page, "")
-	for _, want := range []string{"2 panels", `story title "The Lighthouse"`, "Reference image 1 = Mara", "PANEL 1 (wide shot): Mara climbs", "Characters present: Mara.", `Caption box: "Rain hammered."`, `Speech bubble from Mara: "Hello?"`, "PANEL 2 (close-up shot)", "Letter every speech bubble"} {
+	for _, want := range []string{"2 panels", `story title "The Lighthouse"`, "Reference image 1 = Mara", "PANEL 1 (wide shot): Setting: lighthouse stairs, storm light. Mara climbs.", "Characters present, each drawn once: Mara.", `Caption box: "Rain hammered."`, `Speech bubble from Mara: "Hello?"`, `Speech bubble from Deep Voice, who is off-panel`, `Sound effect lettered into the art: "CRASH!"`, "PANEL 2 (close-up shot): She listens.\n", "each exactly once", "in the order listed"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("page prompt missing %q:\n%s", want, p)
 		}
@@ -92,10 +119,12 @@ type recorder struct {
 	images               []Image
 	answer               string
 	err                  error
+	users, schemas       []string // every exchange, oldest first
 }
 
 func (r *recorder) ChatJSON(ctx context.Context, system, user string, images []Image, schemaName string, schema map[string]any, out any) error {
 	r.system, r.user, r.schema, r.images = system, user, schemaName, images
+	r.users, r.schemas = append(r.users, user), append(r.schemas, schemaName)
 	if r.err != nil {
 		return r.err
 	}
@@ -147,16 +176,20 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 	if err != nil || len(pages) == 0 || pages[0].Number != 1 || pages[0].Panels[0].Number != 1 {
 		t.Fatalf("breakdown: %+v %v", pages, err)
 	}
-	if r.schema != "pages" || !strings.Contains(r.user, "Aim for about 3 pages") || !strings.Contains(r.user, "CAST:") {
-		t.Fatalf("breakdown prompt: %q", r.user)
+	n := len(r.schemas)
+	if n < 2 || r.schemas[n-2] != "pages" || !strings.Contains(r.users[n-2], "between 3 and 5 pages") || !strings.Contains(r.users[n-2], "CAST:") {
+		t.Fatalf("breakdown prompt: %q", r.users)
+	}
+	if r.schema != "review" || !strings.Contains(r.user, "SCRIPT:\nMARA: Hello?") || !strings.Contains(r.user, "DRAFT STORYBOARD (JSON):\n[{\"number\":1") {
+		t.Fatalf("the draft goes to the editor with the script: %q", r.user)
 	}
 
-	existing := []*store.Page{{Number: 1, Title: "One", Summary: "s", Panels: []store.Panel{{Number: 1, Shot: "wide", Description: "d", Caption: "c", Dialogue: []store.Line{{Character: "Mara", Text: "hi"}}}}}}
+	existing := []*store.Page{{Number: 1, Title: "One", Summary: "s", Panels: []store.Panel{{Number: 1, Shot: "wide", Description: "d", Caption: "c", Dialogue: []store.Line{{Character: "Mara", Text: "hi"}}}, {Number: 2, Shot: "close-up", Setting: "the attic", Description: "e", SFX: "BANG!"}}}}
 	pages, err = AdjustBreakdown(ctx, r, st, []*store.Character{mara()}, existing, "make it longer")
 	if err != nil || len(pages) == 0 {
 		t.Fatalf("adjust breakdown: %v", err)
 	}
-	if !strings.Contains(r.user, "CURRENT PAGES:") || !strings.Contains(r.user, `caption: "c"`) || !strings.Contains(r.user, `Mara: "hi"`) || !strings.Contains(r.user, "make it longer") {
+	if !strings.Contains(r.user, "CURRENT PAGES:") || !strings.Contains(r.user, `caption: "c"`) || !strings.Contains(r.user, `Mara: "hi"`) || !strings.Contains(r.user, "Panel 1 (wide): d") || !strings.Contains(r.user, `Panel 2 (close-up) at the attic: e [] sfx: "BANG!"`) || !strings.Contains(r.user, "make it longer") {
 		t.Fatalf("adjust breakdown prompt: %q", r.user)
 	}
 
@@ -166,6 +199,42 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 	}
 	if r.schema != "page" || !strings.Contains(r.user, "PAGE 1:") || !strings.Contains(r.user, "split panel 1") {
 		t.Fatalf("adjust page prompt: %q", r.user)
+	}
+}
+
+// editor plans one page, then answers the review as told.
+type editor struct {
+	empty
+	problems []string
+	err      error
+}
+
+func (e editor) ChatJSON(ctx context.Context, system, user string, images []Image, schemaName string, schema map[string]any, out any) error {
+	var answer string
+	switch schemaName {
+	case "pages":
+		answer = `{"pages":[{"number":1,"title":"Draft","panels":[{"number":1,"shot":"wide","description":"d"}]}]}`
+	case "review":
+		if e.err != nil {
+			return e.err
+		}
+		problems, _ := json.Marshal(e.problems)
+		answer = `{"problems":` + string(problems) + `,"pages":[{"number":7,"title":"Fixed","panels":[{"number":3,"shot":"wide","description":"d"},{"number":9,"shot":"close-up","description":"r"}]}]}`
+	}
+	return json.Unmarshal([]byte(answer), out)
+}
+
+func TestBreakdownReview(t *testing.T) {
+	ctx := context.Background()
+	pages, err := Breakdown(ctx, editor{problems: []string{"p1 panel 1: reaction before its cause"}}, story(), nil)
+	if err != nil || len(pages) != 1 || pages[0].Title != "Fixed" || pages[0].Number != 1 || pages[0].Panels[1].Number != 2 {
+		t.Fatalf("the editor's fixes replace the draft, renumbered: %+v %v", pages, err)
+	}
+	for _, e := range []editor{{}, {err: errors.New("boom")}} {
+		pages, err = Breakdown(ctx, e, story(), nil)
+		if err != nil || len(pages) != 1 || pages[0].Title != "Draft" {
+			t.Fatalf("no problems found, or the review failed: the draft stands: %+v %v", pages, err)
+		}
 	}
 }
 

@@ -877,22 +877,19 @@ func (r *Runner) drawPage(ctx context.Context, story *store.Story, chars []*stor
 	defer func() { <-r.imgSem }()
 	_ = r.st.SetPageImage(ctx, p.ID, p.Image, store.ImageGenerating, "")
 
-	// Only the characters on this page ride along as references (the API
-	// composes from a handful of images; the whole cast would dilute it).
-	present := map[string]bool{}
-	for _, pn := range p.Panels {
-		for _, n := range pn.Characters {
-			present[strings.ToLower(n)] = true
+	// Only the characters on this page ride along as references (a whole
+	// cast would dilute them), the most present first, so a crowded page
+	// drops a passer-by's sheet rather than a speaker's.
+	var withSheet []*store.Character
+	for _, c := range chars {
+		if _, ok := refs[strings.ToLower(c.Name)]; ok {
+			withSheet = append(withSheet, c)
 		}
 	}
-	var cast []*store.Character
+	cast := pipeline.PageCast(withSheet, p, pipeline.MaxPageRefs)
 	var images [][]byte
-	for _, c := range chars {
-		key := strings.ToLower(c.Name)
-		if b, ok := refs[key]; ok && (present[key] || len(present) == 0) && len(images) < 6 {
-			cast = append(cast, c)
-			images = append(images, b)
-		}
+	for _, c := range cast {
+		images = append(images, refs[strings.ToLower(c.Name)])
 	}
 	png, err := r.ai.EditImage(ctx, pipeline.PagePrompt(story, cast, p, feedback), images, pipeline.PageSize)
 	if err != nil {

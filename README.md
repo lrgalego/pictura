@@ -9,7 +9,7 @@ The workflow, one screen per step:
 
 1. **Script** — paste the story, pick a look (comic, manga, storybook, cartoon, noir, pixel art).
 2. **Characters** — every character gets an illustrator-ready description first, and a voice cast from their age and temperament (the narrator too); press play to hear any character say their line in any voice and pick another. Attach reference images (photos, sketches, outfits, props) to any character, upload a finished model sheet to use as-is, or reuse a character from another story; adjust the words, then draw the remaining sheets from the references. Afterwards adjust, redraw or edit any character.
-3. **Pages** — the script becomes pages of panels with shots, dialogue and captions. Adjust one page or the whole plan.
+3. **Pages** — the script becomes pages of panels with shots, settings, dialogue, captions and sound effects, one moment per panel with every line given to its real speaker in script order; an editor pass then checks the draft against the script and fixes what slipped (a line out of order, a reaction before its cause). The page count follows the script's sentences and lines of dialogue, not its word count. Adjust one page or the whole plan.
 4. **Comic** — pages are drawn with the character sheets as references so the cast stays on-model. Redraw any page with notes; download as PDF or a zip of PNGs.
 5. **Read to me** — the finished comic is read aloud page by page, every balloon in its speaker's voice and the captions by the narrator, while a highlighter follows each word on the drawn page (the balloon being read is spotlit; on phones the page zooms in to follow it). Tap a balloon to hear it again; pages turn by themselves.
 

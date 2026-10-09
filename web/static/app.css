@@ -353,6 +353,8 @@ h1, h2, h3, .display {
 .pn__head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .pn__num { font-family: var(--font-display); font-weight: 800; }
 .pn__desc { margin: 0; line-height: 1.45; }
+.pn__setting { margin: 0; font-size: 0.8rem; color: var(--muted-foreground); }
+.pn__sfx { align-self: flex-start; font-family: var(--font-display); font-weight: 800; font-style: italic; letter-spacing: 0.04em; color: var(--primary); transform: rotate(-2deg); }
 .pn__cast { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 .pn__line { background: #fff; color: #221b3a; border: 2px solid #221b3a; border-radius: 1rem; padding: 0.3rem 0.65rem; font-family: var(--font-display); font-weight: 600; }
 .pn__line b { color: var(--primary); font-weight: 800; }

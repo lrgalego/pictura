@@ -602,10 +602,12 @@ type Line struct {
 type Panel struct {
 	Number      int      `json:"number"`
 	Shot        string   `json:"shot"`
+	Setting     string   `json:"setting,omitempty"` // where the panel happens, so the art keeps its location
 	Description string   `json:"description"`
 	Characters  []string `json:"characters"`
 	Dialogue    []Line   `json:"dialogue"`
 	Caption     string   `json:"caption"`
+	SFX         string   `json:"sfx,omitempty"` // sound-effect lettering drawn into the art
 }
 
 type Page struct {

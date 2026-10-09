@@ -155,6 +155,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 			}
 		}
 		v = map[string]any{"pages": pages}
+	case "review":
+		v = map[string]any{"problems": []string{}, "pages": []PageSpec{}} // the draft stands
 	case "voices":
 		v = fakeCasting(user)
 	case "lettering":
@@ -293,7 +295,7 @@ func breakdown(script string, chars []CharacterSpec) []PageSpec {
 	if len(paras) == 0 {
 		paras = []string{"The story begins."}
 	}
-	n := suggestPages(script)
+	n, _ := pageRange(script)
 	if n > 6 {
 		n = 6
 	}
@@ -312,7 +314,10 @@ func breakdown(script string, chars []CharacterSpec) []PageSpec {
 		panels := min(4, max(2, len(chunk)))
 		for j := 0; j < panels; j++ {
 			line := chunk[min(j, len(chunk)-1)]
-			pn := store.Panel{Number: j + 1, Shot: shots[(i+j)%len(shots)], Description: clip(line, 220), Caption: ""}
+			pn := store.Panel{Number: j + 1, Shot: shots[(i+j)%len(shots)], Setting: "the harbour at dusk", Description: clip(line, 220), Caption: ""}
+			if j == panels-1 {
+				pn.SFX = "KRAKOOM!"
+			}
 			if len(chars) > 0 {
 				pn.Characters = []string{chars[(i+j)%len(chars)].Name}
 				if len(chars) > 1 && j%2 == 1 {
