@@ -1379,6 +1379,29 @@ func (s *Store) ReplacePageLines(ctx context.Context, pageID int64, image string
 	return tx.Commit()
 }
 
+// SetLineBoxes stores where a page's lines sit on its art — each line's
+// box, its words' boxes and whether they were measured from the ink —
+// keeping everything else (text, clips, timings), and moves the page's
+// reading to a version.
+func (s *Store) SetLineBoxes(ctx context.Context, pageID int64, version int, lines []*PageLine) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, l := range lines {
+		box, _ := json.Marshal(l.Box)
+		words, _ := json.Marshal(orWords(l.Words))
+		if _, err := tx.ExecContext(ctx, `UPDATE page_lines SET box_json = ?, words_json = ?, exact = ? WHERE id = ? AND page_id = ?`, string(box), string(words), l.Exact, l.ID, pageID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET reading_version = ? WHERE id = ?`, version, pageID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetLineAudio records a line's clip, the voice it was made with and the
 // words with their timings, and clears any earlier failure.
 func (s *Store) SetLineAudio(ctx context.Context, lineID int64, voice, audio string, words []LineWord) error {

@@ -1093,6 +1093,55 @@ func TestNarrateUpgradesOldReadings(t *testing.T) {
 	}
 }
 
+// A page read and voiced under the older measure (version 2) only has its
+// words placed again: nothing is read, designed or voiced, and the clips
+// and timings stay.
+func TestNarrateRemeasuresOlderReadings(t *testing.T) {
+	e, ai, voice := sfxEnv(t)
+	e.drawnBook()
+	p := e.pages()[0]
+	measured, _ := e.st.PageLines(e.ctx, p.ID)
+	// The older measure's boxes: shifted down and estimated.
+	var old []*store.PageLine
+	for _, l := range measured {
+		c := *l
+		c.Words = append([]store.LineWord(nil), l.Words...)
+		for i := range c.Words {
+			c.Words[i].Box.Y1 += 0.03
+			c.Words[i].Box.Y2 += 0.03
+		}
+		c.Exact = false
+		old = append(old, &c)
+	}
+	if err := e.st.SetLineBoxes(e.ctx, p.ID, 2, old); err != nil {
+		t.Fatal(err)
+	}
+	readings, designs, speaks := ai.readings, ai.designs, voice.total()
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("remeasure")
+	if ai.readings != readings || ai.designs != designs || voice.total() != speaks {
+		t.Fatalf("readings %d→%d, designs %d→%d, syntheses %d→%d", readings, ai.readings, designs, ai.designs, speaks, voice.total())
+	}
+	got, _ := e.st.PageLines(e.ctx, p.ID)
+	if len(got) != len(measured) {
+		t.Fatalf("%d lines, want %d", len(got), len(measured))
+	}
+	for i, l := range got {
+		m := measured[i]
+		if l.Audio != m.Audio || l.Text != m.Text || l.Exact != m.Exact || l.Box != m.Box {
+			t.Errorf("line %d: %+v, want %+v", i, l, m)
+		}
+		for wi, w := range l.Words {
+			if w.Box != m.Words[wi].Box || w.Start != m.Words[wi].Start || w.End != m.Words[wi].End || w.Tag != m.Words[wi].Tag {
+				t.Errorf("line %d word %q: %+v, want %+v", i, w.Text, w, m.Words[wi])
+			}
+		}
+	}
+	if pg, _ := e.st.Page(e.ctx, p.ID); pg.ReadingVersion != pipeline.ReadingVersion {
+		t.Fatalf("version: %d", pg.ReadingVersion)
+	}
+}
+
 // When sound design fails, the reading is kept (at version 1) and the page
 // says why; the next attempt only designs.
 func TestSoundDesignFailureKeepsTheReading(t *testing.T) {

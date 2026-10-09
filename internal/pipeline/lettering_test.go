@@ -104,6 +104,92 @@ func TestLayoutMeasuresRealPages(t *testing.T) {
 	}
 }
 
+// TestLayoutMultiRowBubbles is a page whose balloons run to five rows and
+// whose tails reach far below the text. Spark grouped those rows wrongly
+// and the old measure fell back to its drifting boxes; tail slivers made
+// one-row words reach down into the tail.
+func TestLayoutMultiRowBubbles(t *testing.T) {
+	g, fx := loadFixture(t, "rows")
+	lines := layout(g, fx.Reading.Lines, regionsOf(fx), nil, &store.Page{})
+	if len(lines) != 8 {
+		t.Fatalf("%d lines", len(lines))
+	}
+	for _, l := range lines {
+		if !l.Exact {
+			t.Errorf("%q was not measured from the ink", l.Text)
+		}
+	}
+	word := func(li int, text string) Box {
+		for _, w := range lines[li].Words {
+			if w.Text == text {
+				return w.Box
+			}
+		}
+		t.Fatalf("line %d has no %q", li, text)
+		return Box{}
+	}
+	near := func(name string, got Box, x1, y1, x2, y2 float64) {
+		const tol = 8.0
+		if math.Abs(got.X1*1280-x1) > tol || math.Abs(got.Y1*1920-y1) > tol || math.Abs(got.X2*1280-x2) > tol || math.Abs(got.Y2*1920-y2) > tol {
+			t.Errorf("%s at %.0f,%.0f %.0f,%.0f, want %.0f,%.0f %.0f,%.0f", name, got.X1*1280, got.Y1*1920, got.X2*1280, got.Y2*1920, x1, y1, x2, y2)
+		}
+	}
+	near("Mr.", word(0, "Mr."), 392, 63, 430, 85)
+	near("remember", word(0, "remember"), 374, 130, 488, 153)
+	near("go?", word(4, "go?"), 604, 777, 651, 810)
+	near("Terribly.", word(5, "Terribly."), 1076, 756, 1195, 792)
+	near("acquaintance.", word(6, "acquaintance."), 124, 1523, 281, 1551)
+}
+
+func TestLayWords(t *testing.T) {
+	words := []sparkWord{{W: "I"}, {W: "said"}, {W: "nothing!"}}
+	seg := func(x1, x2, row int) segment { return segment{x1, 0, x2, 20, row} }
+	// Wide-set letters split "nothing!" in two, and a speck sits after it.
+	got := layWords(words, []segment{seg(0, 10, 0), seg(30, 90, 0), seg(110, 150, 0), seg(156, 200, 0), seg(260, 262, 0)})
+	if got == nil || got[2] != (Region{110, 0, 200, 20}) || got[0] != (Region{0, 0, 10, 20}) {
+		t.Fatalf("split word, speck: %v", got)
+	}
+	// A tight space joins two words: they share the segment by length.
+	got = layWords(words[1:], []segment{seg(0, 200, 0)})
+	if got == nil || got[0].X2 > got[1].X1 || got[1].X2 != 200 {
+		t.Fatalf("shared segment: %v", got)
+	}
+	// Unread ink in the row a word is in means the ink is not this line.
+	five := []segment{seg(0, 60, 0), seg(100, 160, 0), seg(200, 260, 0), seg(300, 360, 0), seg(400, 460, 0)}
+	if got := layWords([]sparkWord{{W: "was"}}, five); got != nil {
+		t.Fatalf("too much ink left out: %v", got)
+	}
+	// A row left out whole (a tail's tip under the text) is fine.
+	hello := []sparkWord{{"Hello", 0, 0, 50, 20}, {"there", 60, 0, 110, 20}}
+	if got := layWords(hello, []segment{seg(0, 50, 0), seg(60, 110, 0), seg(0, 60, 1)}); got == nil || got[1] != (Region{60, 0, 110, 20}) {
+		t.Fatalf("a whole stray row: %v", got)
+	}
+	// Spark's row breaks decide between equally long readings: "I" starts
+	// the second row, so it is not the "?" left over at the end of the first.
+	rows := []sparkWord{{"honestly?", 100, 0, 300, 20}, {"I", 80, 30, 90, 50}, {"was", 100, 30, 160, 50}}
+	got = layWords(rows, []segment{seg(0, 180, 0), seg(190, 200, 0), seg(0, 70, 1)})
+	if got == nil || got[0] != (Region{0, 0, 200, 20}) || got[1].X1 != 0 || got[2].X2 != 70 {
+		t.Fatalf("row breaks: %v", got)
+	}
+	if layWords(words, nil) != nil {
+		t.Fatal("no ink")
+	}
+}
+
+func TestMatchKeepsArtLetteringOutOfBubbles(t *testing.T) {
+	lines := []sparkLine{
+		{Kind: "sfx", Words: []sparkWord{{"SLAM!", 100, 100, 300, 160}}},
+		{Kind: "sfx", Words: []sparkWord{{"BOOM!", 600, 600, 700, 640}}},
+	}
+	regions := []Region{
+		{90, 90, 310, 170},   // drawn around SLAM!: taken
+		{560, 560, 900, 900}, // the bubble next to BOOM!: far too big
+	}
+	if m := matchRegions(lines, regions, 1000, 1000); m[0] != 0 || m[1] != -1 {
+		t.Fatalf("match: %v", m)
+	}
+}
+
 func TestLayoutFallbacks(t *testing.T) {
 	g, fx := loadFixture(t, "storybook")
 	// No segmentation at all: lines are measured around where Spark put
@@ -143,7 +229,7 @@ func TestLayoutFallbacks(t *testing.T) {
 		}
 	}
 	// Degenerate regions never measure.
-	if measureWords(blank, Region{0, 0, 2, 2}, wordRows(sl[0].Words)) != nil {
+	if measureLine(blank, Region{0, 0, 2, 2}, sl[0].Words) != nil {
 		t.Fatal("tiny region")
 	}
 }

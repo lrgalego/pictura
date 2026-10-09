@@ -1057,14 +1057,25 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 			if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, 1, lines); err != nil {
 				return err
 			}
-		} else if lines, err = r.st.PageLines(ctx, p.ID); err != nil {
-			return err
+		} else {
+			if lines, err = r.st.PageLines(ctx, p.ID); err != nil {
+				return err
+			}
+			// Read under an older measure: place the words again, keeping
+			// the reading, its sound design and its clips.
+			if lines, err = r.remeasure(ctx, p, png, lines); err != nil {
+				return err
+			}
 		}
-		designed, err := r.designSounds(ctx, story, p, png, lines)
-		if err != nil {
-			return err
-		}
-		if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, pipeline.ReadingVersion, designed); err != nil {
+		if p.ReadingImage != p.Image || p.ReadingVersion < pipeline.SoundsVersion {
+			designed, err := r.designSounds(ctx, story, p, png, lines)
+			if err != nil {
+				return err
+			}
+			if err := r.st.ReplacePageLines(ctx, p.ID, p.Image, pipeline.ReadingVersion, designed); err != nil {
+				return err
+			}
+		} else if err := r.st.SetLineBoxes(ctx, p.ID, pipeline.ReadingVersion, lines); err != nil {
 			return err
 		}
 	}
@@ -1107,6 +1118,29 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 	}
 	wg.Wait()
 	return r.st.SetReadingError(ctx, p.ID, "")
+}
+
+// remeasure places a page's stored lines on its art again (pipeline.
+// Remeasure) and returns them with their new boxes; nothing is stored yet.
+func (r *Runner) remeasure(ctx context.Context, p *store.Page, png []byte, lines []*store.PageLine) ([]*store.PageLine, error) {
+	in := make([]pipeline.LetterLine, len(lines))
+	for i, l := range lines {
+		in[i] = pipeline.LetterLine{Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: pipeline.Box(l.Box), Exact: l.Exact}
+		for _, w := range l.Words {
+			in[i].Words = append(in[i].Words, pipeline.LetterWord{Text: w.Text, Box: pipeline.Box(w.Box), Tag: w.Tag})
+		}
+	}
+	out, err := pipeline.Remeasure(ctx, r.ai, png, in)
+	if err != nil {
+		return nil, err
+	}
+	for i, l := range lines {
+		l.Box, l.Exact = store.LineBox(out[i].Box), out[i].Exact
+		for wi := range l.Words {
+			l.Words[wi].Box = store.LineBox(out[i].Words[wi].Box)
+		}
+	}
+	return lines, nil
 }
 
 // designSounds runs the sound-design pass over a page's read lines and
