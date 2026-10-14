@@ -567,13 +567,165 @@ func TestReadToMeOnAPhone(t *testing.T) {
 	if number(t, w) > 390 {
 		t.Fatalf("the reader overflows on a phone: %v", w)
 	}
-	// Zoom follows the balloon on small screens.
+	// Zoom follows the story panel by panel on small screens.
 	must(t, expect.Locator(page.Locator("[data-act=zoom]")).ToHaveAttribute("aria-pressed", "true"))
 	must(t, page.Locator("[data-act=start]").Tap())
 	must(t, expect.Locator(page.Locator(".reader__sheet.is-zoomed")).ToHaveCount(1))
 	must(t, expect.Locator(page.Locator(".reader__hl")).ToBeVisible())
 	if dir := os.Getenv("E2E_SHOTS"); dir != "" {
 		_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(dir + "/reader-phone.png")})
+	}
+
+	// Step through page one's lines: the camera frames each line's panel,
+	// whole and filling the stage; it holds still while the lines stay in
+	// a panel and moves when they go to the next.
+	type view struct {
+		Line              int
+		Frame, Transform  string
+		Inside, Snug, Ink bool
+	}
+	look := func() view {
+		v, err := page.Evaluate(`(async () => {
+			const root = document.getElementById('reader');
+			const d = window.__read || (window.__read = await (await fetch(root.dataset.src)).json());
+			const no = parseInt(document.querySelector('.reader__pageno').textContent.match(/Page (\d+)/)[1], 10);
+			const p = d.pages.find(x => x.number === no);
+			const s = document.querySelector('.reader__spot');
+			const near = (a, b) => Math.abs(parseFloat(a) - b) < 0.01;
+			const k = p.lines.findIndex(l => near(s.style.left, l.box.x1 * 100 - 1.2) && near(s.style.top, l.box.y1 * 100 - 0.8));
+			if (no !== 1 || k < 0) return { line: -1 };
+			const f = p.lines[k].frame, b = p.lines[k].box;
+			const sheet = document.querySelector('.reader__sheet'), sh = sheet.getBoundingClientRect();
+			const st = document.querySelector('.reader__stage').getBoundingClientRect();
+			const at = (x, y) => ({ x: sh.left + x * sh.width, y: sh.top + y * sh.height });
+			const a = at(f.x1, f.y1), z = at(f.x2, f.y2), ba = at(b.x1, b.y1), bz = at(b.x2, b.y2);
+			return {
+				line: k, frame: [f.x1, f.y1, f.x2, f.y2].join(), transform: sheet.style.transform,
+				inside: a.x >= st.left - 1 && z.x <= st.right + 1 && a.y >= st.top - 1 && z.y <= st.bottom + 1,
+				snug: z.x - a.x >= 0.85 * st.width || z.y - a.y >= 0.85 * st.height,
+				ink: ba.x >= st.left - 1 && bz.x <= st.right + 1 && ba.y >= st.top - 1 && bz.y <= st.bottom + 1,
+			};
+		})()`)
+		must(t, err)
+		m := v.(map[string]any)
+		out := view{Line: int(number(t, m["line"]))}
+		if out.Line >= 0 {
+			out.Frame, out.Transform = m["frame"].(string), m["transform"].(string)
+			out.Inside, out.Snug, out.Ink = m["inside"] == true, m["snug"] == true, m["ink"] == true
+		}
+		return out
+	}
+	// Hearing a line again keeps the camera where it is: same panel.
+	first := look()
+	if first.Line < 0 {
+		t.Fatal("page one's first line should be playing")
+	}
+	_, err = page.Evaluate(fmt.Sprintf(`document.querySelectorAll('.reader__hot')[%d].click()`, first.Line))
+	must(t, err)
+	page.WaitForTimeout(200)
+	if again := look(); again.Line != first.Line || again.Transform != first.Transform {
+		t.Fatalf("replaying line %d moved the camera: %+v then %+v", first.Line, first, again)
+	}
+
+	var views []view
+	for step := 0; step < 16; step++ {
+		v := look()
+		if v.Line < 0 {
+			break // past page one
+		}
+		if !v.Inside || !v.Snug || !v.Ink {
+			t.Fatalf("line %d: its panel %s should fill the stage with the balloon in view: %+v", v.Line, v.Frame, v)
+		}
+		if len(views) == 0 || views[len(views)-1].Line != v.Line {
+			views = append(views, v)
+		}
+		must(t, page.Keyboard().Press("ArrowRight"))
+		page.WaitForTimeout(150)
+	}
+	if len(views) < 3 {
+		t.Fatalf("stepped through %d lines of page one", len(views))
+	}
+	frames := map[string]string{}
+	for i, v := range views {
+		if seen, ok := frames[v.Frame]; ok && seen != v.Transform {
+			t.Fatalf("line %d: the camera moved within panel %s (%s, was %s)", i, v.Frame, v.Transform, seen)
+		}
+		if i > 0 && v.Frame != views[i-1].Frame && v.Transform == views[i-1].Transform {
+			t.Fatalf("line %d: a new panel %s, but the camera stayed (%s)", i, v.Frame, v.Transform)
+		}
+		frames[v.Frame] = v.Transform
+	}
+	if len(frames) < 2 {
+		t.Fatalf("the camera should go panel to panel: %+v", views)
+	}
+}
+
+// Turning the page lands on the new page: its art is in when the turn
+// plays, never the old page animated in again. The images are slowed
+// down, as on a phone network, so a turn that did not wait would show.
+func TestReadToMeTurnsToTheNewPage(t *testing.T) {
+	desk := newPage(t)
+	pages := drawnComic(t, desk, "turner")
+	if pages < 2 {
+		t.Skip("one page: nothing to turn")
+	}
+	cookies, err := desk.Context().Cookies()
+	must(t, err)
+	ctx, err := browser.NewContext(playwright.BrowserNewContextOptions{Viewport: &playwright.Size{Width: 1280, Height: 800}, ReducedMotion: playwright.ReducedMotionNoPreference})
+	must(t, err)
+	t.Cleanup(func() { ctx.Close() })
+	var add []playwright.OptionalCookie
+	for _, c := range cookies {
+		add = append(add, c.ToOptionalCookie())
+	}
+	must(t, ctx.AddCookies(add))
+	page, err := ctx.NewPage()
+	must(t, err)
+	must(t, page.Route("**/media/*.png", func(r playwright.Route) {
+		time.Sleep(700 * time.Millisecond)
+		_ = r.Continue()
+	}))
+	goto_(t, page, desk.URL()+"/../read")
+	must(t, expect.Locator(page.Locator(".reader__status")).ToContainText("ready when you are", playwright.LocatorAssertionsToContainTextOptions{Timeout: playwright.Float(30000)}))
+	// Every turn animation records what the sheet showed as it began.
+	_, err = page.Evaluate(`(() => {
+		window.__turns = [];
+		const img = document.querySelector('.reader__img');
+		document.querySelector('.reader__sheet').addEventListener('animationstart', e => {
+			if (e.animationName === 'reader-turn') window.__turns.push({ src: img.getAttribute('src'), complete: img.complete, w: img.naturalWidth, page: document.querySelector('.reader__pageno').textContent });
+		});
+	})()`)
+	must(t, err)
+	must(t, page.Locator("[data-act=start]").Click())
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(1, playwright.LocatorAssertionsToHaveCountOptions{Timeout: playwright.Float(20000)}))
+	// Turn at once, before the next page's art could have been fetched.
+	must(t, page.Keyboard().Press("ArrowDown"))
+	if dir := os.Getenv("E2E_SHOTS"); dir != "" {
+		for i := 0; i < 10; i++ { // the turn, frame by frame
+			_, _ = page.Locator(".reader__stage").Screenshot(playwright.LocatorScreenshotOptions{Path: playwright.String(fmt.Sprintf("%s/reader-turn-%02d.png", dir, i)), Animations: playwright.ScreenshotAnimationsAllow})
+			page.WaitForTimeout(120)
+		}
+	}
+	must(t, expect.Locator(page.Locator(".reader__pageno")).ToHaveText(fmt.Sprintf("Page 2 of %d", pages)))
+	must(t, expect.Locator(page.Locator(".reader__ctl--play.is-playing")).ToHaveCount(1, playwright.LocatorAssertionsToHaveCountOptions{Timeout: playwright.Float(20000)}))
+	v, err := page.Evaluate(`(async () => {
+		const d = await (await fetch(document.getElementById('reader').dataset.src)).json();
+		return { turns: window.__turns, images: d.pages.map(p => p.image), shown: document.querySelector('.reader__img').getAttribute('src') };
+	})()`)
+	must(t, err)
+	m := v.(map[string]any)
+	turns, images := m["turns"].([]any), m["images"].([]any)
+	if len(turns) != 2 {
+		t.Fatalf("two turns (onto page 1, then page 2), saw %v", turns)
+	}
+	for i, tr := range turns {
+		tm := tr.(map[string]any)
+		if tm["src"] != images[i] || tm["complete"] != true || number(t, tm["w"]) == 0 {
+			t.Fatalf("turn %d animated %v, want page %d's art (%v) already in", i+1, tm, i+1, images[i])
+		}
+	}
+	if m["shown"] != images[1] {
+		t.Fatalf("after the turn the sheet shows %v, want page 2 (%v)", m["shown"], images[1])
 	}
 }
 

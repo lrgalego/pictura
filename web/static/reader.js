@@ -27,6 +27,8 @@
   var rate = 1, autoTurn = true;
   var zoom = window.matchMedia('(max-width: 720px)').matches;
   var wordIdx = -1, raf = 0, poll = 0, timer = 0, prepared = false, lock = null;
+  var shown = 0;            // counts show() calls: a later one wins
+  var camera = '';          // the frame the zoomed view is on
   var audio = new Audio();
   audio.preload = 'auto';
   var preload = new Audio();
@@ -67,8 +69,7 @@
     // Waiting for this page: go as soon as it is ready.
     if (wanted && !playing && ready(page()) && !wait.hidden) {
       hideWait();
-      show(pi, false);
-      startPage();
+      show(pi, false).then(function (ok) { if (ok && wanted && !playing) startPage(); });
     }
   }
 
@@ -90,7 +91,7 @@
       status.textContent = 'Warming up the voices…';
     }
     if (!wait.hidden && p) waitMsg.textContent = waitingText(p);
-    if (!img.getAttribute('src') && p && p.image) show(pi, false);
+    if (!shown && p && p.image) show(pi, false);
   }
 
   function progress() {
@@ -115,24 +116,65 @@
     el.style.height = ((b.y2 - b.y1) * 100 + pad * 4 / 3) + '%';
   }
 
+  // show puts page i on the sheet. The new art is fetched and decoded
+  // before it replaces the old, and only then does the turn play: setting
+  // the src straight away kept the old page on screen until the new one
+  // arrived, so the turn animated the old page in again and the new one
+  // popped up after it. The promise says whether page i is (still) the
+  // one on the sheet once it is shown.
   function show(i, turn) {
     var p = page(i);
-    if (!p) return;
+    if (!p) return Promise.resolve(false);
     pi = i;
+    li = -1;
+    var seq = ++shown;
     pageNo.textContent = 'Page ' + p.number + ' of ' + data.pages.length;
-    if (p.image && img.getAttribute('src') !== p.image) {
-      img.src = p.image;
-      img.alt = 'Page ' + p.number + (p.title ? ': ' + p.title : '');
-    }
-    if (turn) {
-      sheet.classList.remove('is-turning');
-      void sheet.offsetWidth; // restart the animation
-      sheet.classList.add('is-turning');
-    }
     hl.hidden = true;
     spot.hidden = true;
     who.textContent = '';
+    hotspots.textContent = '';
     unzoom();
+    return art(p.image).then(function () {
+      if (seq !== shown) return false; // turned again meanwhile
+      if (!p.image) return;
+      if (img.getAttribute('src') !== p.image) {
+        // Until the new src is decoded the img keeps showing the old page;
+        // the turn waits for it below.
+        img.src = p.image;
+        img.alt = 'Page ' + p.number + (p.title ? ': ' + p.title : '');
+      } else if (img.complete) {
+        return;
+      }
+      // Swapped just now, or by an earlier show still on its way in.
+      return img.decode ? img.decode().catch(function () {}) : null;
+    }).then(function (ok) {
+      if (ok === false || seq !== shown) return false;
+      if (img.naturalWidth) sheet.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
+      if (turn) {
+        sheet.classList.remove('is-turning');
+        void sheet.offsetWidth; // restart the animation
+        sheet.classList.add('is-turning');
+      }
+      hotspotsFor(p);
+      return true;
+    });
+  }
+
+  // art fetches and decodes a page image once; the next page's is asked
+  // for while this one plays, so a turn rarely waits.
+  var arts = {};
+  function art(src) {
+    if (!src) return Promise.resolve(null);
+    if (!arts[src]) {
+      var pic = new Image();
+      pic.src = src;
+      var done = pic.decode ? pic.decode() : new Promise(function (ok, fail) { pic.onload = ok; pic.onerror = fail; });
+      arts[src] = done.then(function () { return pic; }, function () { delete arts[src]; return null; });
+    }
+    return arts[src];
+  }
+
+  function hotspotsFor(p) {
     hotspots.textContent = '';
     (p.lines || []).forEach(function (l, k) {
       var b = document.createElement('button');
@@ -165,6 +207,7 @@
   function startPage() {
     var p = page();
     li = -1;
+    if (page(pi + 1)) art(page(pi + 1).image); // ready for the turn
     if (!p.lines.length) {
       // A page without words: let it be looked at, then go on.
       setPlaying(true);
@@ -192,7 +235,7 @@
       who.className = 'reader__who' + (l.speaker ? '' : ' reader__who--narrator');
     }
     hl.classList.toggle('is-effect', !!l.effect);
-    zoomTo(l.box);
+    zoomTo(frameOf(l));
     audio.src = l.audio;
     audio.playbackRate = rate;
     audio.preservesPitch = true;
@@ -268,13 +311,15 @@
     if (i < 0 || i >= data.pages.length) return;
     stop();
     wanted = play;
-    show(i, true);
-    if (!play) return;
-    if (ready(page())) {
-      timer = setTimeout(startPage, 650);
-    } else {
-      showWait();
-    }
+    show(i, true).then(function (ok) {
+      // The turn starts once the new page is in; it plays when it lands.
+      if (!ok || !wanted) return;
+      if (ready(page())) {
+        timer = setTimeout(startPage, 650);
+      } else {
+        showWait();
+      }
+    });
   }
 
   function showWait() {
@@ -359,23 +404,38 @@
     playLine(k);
   }
 
-  // ---------- zoom (small screens): follow the balloon ----------
+  // ---------- zoom (small screens): panel to panel ----------
 
-  function zoomTo(b) {
+  // The camera frames the panel a line is in (read.json's frame: the
+  // panel, or the whole page for a line in none). It stays put while the
+  // lines are in the same panel and glides to the next panel when the
+  // story moves on.
+  var PAGE = { x1: 0, y1: 0, x2: 1, y2: 1 };
+  function frameOf(l) { return (l && l.frame) || PAGE; }
+
+  function zoomTo(b, again) {
     if (!zoom) return;
+    var key = [b.x1, b.y1, b.x2, b.y2].join();
+    if (key === camera && !again) return;
+    camera = key;
     var W = sheet.clientWidth, H = sheet.clientHeight, SW = stage.clientWidth, SH = stage.clientHeight;
-    var bw = Math.max(0.05, b.x2 - b.x1);
-    var s = Math.min(2.4, Math.max(1.4, 0.75 / bw));
+    var fw = Math.max(0.05, b.x2 - b.x1) * W, fh = Math.max(0.05, b.y2 - b.y1) * H;
+    // As big as the panel fits the stage, with a little room round it.
+    var s = Math.min(3, 0.94 * Math.min(SW / fw, SH / fh));
+    if (s < 1.04) { sheet.style.transform = ''; sheet.classList.remove('is-zoomed'); return; }
     var cx = (b.x1 + b.x2) / 2 * W * s, cy = (b.y1 + b.y2) / 2 * H * s;
     var ox = (SW - W) / 2, oy = (SH - H) / 2; // where the sheet sits unzoomed
     var x = SW / 2 - cx - ox, y = SH / 2 - cy - oy;
+    // Never past the page's edge where the page can fill the stage.
     x = Math.min(-ox, Math.max(SW - W * s - ox, x));
     y = Math.min(-oy, Math.max(SH - H * s - oy, y));
     if (W * s < SW) x = (SW - W * s) / 2 - ox;
+    if (H * s < SH) y = (SH - H * s) / 2 - oy;
     sheet.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
     sheet.classList.add('is-zoomed');
   }
   function unzoom() {
+    camera = '';
     sheet.style.transform = '';
     sheet.classList.remove('is-zoomed');
   }
@@ -424,7 +484,7 @@
       case 'zoom':
         zoom = !zoom;
         b.setAttribute('aria-pressed', String(zoom));
-        if (zoom && li >= 0 && page().lines[li]) zoomTo(page().lines[li].box); else unzoom();
+        if (zoom && li >= 0 && page().lines[li]) zoomTo(frameOf(page().lines[li]), true); else unzoom();
         break;
     }
   });
@@ -441,7 +501,7 @@
   });
 
   window.addEventListener('resize', function () {
-    if (zoom && li >= 0 && page() && page().lines[li]) zoomTo(page().lines[li].box);
+    if (zoom && li >= 0 && page() && page().lines[li]) zoomTo(frameOf(page().lines[li]), true);
   });
 
   load().then(function () { prepare(false); tick(); }).catch(function () {

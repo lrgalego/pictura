@@ -1,13 +1,18 @@
 package web
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"image"
 	"net/http"
+	"sync"
 
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
 )
@@ -34,6 +39,10 @@ type readLine struct {
 	// Effect is set on a sound effect: its words light up together while
 	// it plays, and nobody "says" it.
 	Effect string `json:"effect,omitempty"`
+	// Frame is what the camera shows while the line plays: the panel the
+	// line is in, or the whole page when it is in none (a title, a
+	// caption across two panels) or the page has no panels to go by.
+	Frame store.LineBox `json:"frame"`
 }
 
 type readPageData struct {
@@ -45,6 +54,9 @@ type readPageData struct {
 	Error  string     `json:"error,omitempty"`
 	Lines  []readLine `json:"lines"`
 	Failed int        `json:"failed,omitempty"` // lines skipped because they could not be made
+	// Panels are the page's panels as found in its art, in reading order
+	// (only for a page that plays).
+	Panels []store.LineBox `json:"panels"`
 }
 
 type readData struct {
@@ -82,7 +94,7 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 		return out, err
 	}
 	for _, p := range pages {
-		d := readPageData{ID: p.ID, Number: p.Number, Title: p.Title, Lines: []readLine{}}
+		d := readPageData{ID: p.ID, Number: p.Number, Title: p.Title, Lines: []readLine{}, Panels: []store.LineBox{}}
 		switch {
 		case p.ImageStatus != store.ImageReady || p.Image == "":
 			d.Status = readUndrawn
@@ -107,12 +119,93 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 					d.Failed++ // could not be made: the reader skips it
 					continue
 				}
-				d.Lines = append(d.Lines, readLine{ID: l.ID, Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: l.Box, Audio: "/media/" + l.Audio, Words: l.Words, Effect: l.Sound})
+				d.Lines = append(d.Lines, readLine{ID: l.ID, Kind: l.Kind, Speaker: l.Speaker, Text: l.Text, Box: l.Box, Audio: "/media/" + l.Audio, Words: l.Words, Effect: l.Sound, Frame: wholePage})
 			}
 		}
 		out.Pages = append(out.Pages, d)
 	}
+	s.framePanels(r.Context(), pages, out.Pages)
 	return out, nil
+}
+
+// wholePage frames a line that is in no panel.
+var wholePage = store.LineBox{X1: 0, Y1: 0, X2: 1, Y2: 1}
+
+// framePanels finds the panels of every page that plays and frames each
+// line in its own, so the camera goes panel to panel. The pages are
+// looked at side by side, each image only once (panelCache).
+func (s *server) framePanels(ctx context.Context, pages []*store.Page, out []readPageData) {
+	var wg sync.WaitGroup
+	for i := range out {
+		if len(out[i].Lines) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(d *readPageData, name string) {
+			defer wg.Done()
+			panels := s.panels(ctx, name)
+			for _, b := range panels {
+				d.Panels = append(d.Panels, store.LineBox(b))
+			}
+			for k, l := range d.Lines {
+				if at, ok := pipeline.PanelFor(panels, pipeline.Box(l.Box)); ok {
+					d.Lines[k].Frame = store.LineBox(panels[at])
+				}
+			}
+		}(&out[i], pages[i].Image)
+	}
+	wg.Wait()
+}
+
+// panels are where the panels sit on a page's art. Image names are random
+// and an image is never rewritten (a redraw is a new name), so what was
+// found for a name holds for good: it is kept, for the last few hundred.
+func (s *server) panels(ctx context.Context, name string) []pipeline.Box {
+	if b, ok := panelCache.get(name); ok {
+		return b
+	}
+	data, err := s.st.ReadImage(ctx, name)
+	if err != nil {
+		return nil // not kept: the next poll tries again
+	}
+	var found []pipeline.Box
+	if img, _, err := image.Decode(bytes.NewReader(data)); err == nil {
+		found = pipeline.FindPanels(img)
+	}
+	panelCache.put(name, found)
+	return found
+}
+
+var panelCache = &boxCache{items: map[string][]pipeline.Box{}}
+
+const panelCacheSize = 512
+
+// boxCache keeps the panels found per image name, forgetting the oldest.
+type boxCache struct {
+	mu    sync.Mutex
+	items map[string][]pipeline.Box
+	order []string
+}
+
+func (c *boxCache) get(name string) ([]pipeline.Box, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	b, ok := c.items[name]
+	return b, ok
+}
+
+func (c *boxCache) put(name string, b []pipeline.Box) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.items[name]; ok {
+		return
+	}
+	c.items[name] = b
+	c.order = append(c.order, name)
+	if len(c.order) > panelCacheSize {
+		delete(c.items, c.order[0])
+		c.order = c.order[1:]
+	}
 }
 
 func (s *server) readPage(w http.ResponseWriter, r *http.Request) {
