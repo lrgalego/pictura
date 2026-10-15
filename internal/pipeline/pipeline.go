@@ -136,12 +136,13 @@ var panelSchema = obj(map[string]any{
 	"number":      integer("1-based panel number within the page"),
 	"shot":        str("Camera: wide, medium, close-up, extreme close-up, over-the-shoulder, bird's-eye, low angle"),
 	"setting":     str("Where this panel happens, as a place name reused word for word by every panel in that place (e.g. 'the stone chamber' then 'the gameshow studio'), so the art never drifts back to an earlier location; light and mood go in the description"),
+	"staging":     str("The standing arrangement in this place that every panel keeps: vehicles, seats, sides and who is in each, in a fixed order (e.g. 'three coaster carts in a row on one track, front to back: Ash, Emmy, Prince, each locked in by a lap bar'). Written once when the arrangement is set up, then repeated word for word until the script changes it — a close-up keeps it too. Empty when nobody holds a place"),
 	"description": str("The one moment drawn: who is where in the frame (left to right, in the order they speak), action, expressions, composition — concrete and visual"),
 	"characters":  arr(str("Cast names of characters visible in the panel, nobody else")),
 	"dialogue":    arr(lineSchema),
 	"caption":     str("Narration caption box text, or empty string"),
 	"sfx":         str("Sound-effect lettering drawn into the art (e.g. 'SLAM!'), or empty string"),
-}, "number", "shot", "setting", "description", "characters", "dialogue", "caption", "sfx")
+}, "number", "shot", "setting", "staging", "description", "characters", "dialogue", "caption", "sfx")
 
 var pageSchema = obj(map[string]any{
 	"number":  integer("1-based page number"),
@@ -254,7 +255,7 @@ Reading the script:
 - A voice that is not in the cast (an announcer, a voice from the dark, a screen) is its own speaker with a short descriptive name. Never give its lines to a cast member or to the narrator. When the script keeps a speaker hidden until a reveal, keep the mystery: name them as the script describes them ("Loud Voice") until they are revealed. A speaker who is heard but not seen in a panel is simply left out of that panel's characters.
 
 Fidelity:
-- Keep every line of dialogue that matters to the story, in the order it is spoken, with its real speaker, each exactly once: walk the script from top to bottom and never move a line earlier, repeat it or skip back. Trim long lines to bubble length but keep their meaning, jokes and punchlines; never invent dialogue the script does not have.
+- Keep every line of dialogue that matters to the story, in the order it is spoken, with its real speaker, each exactly once: walk the script from top to bottom and never move a line earlier, repeat it or skip back. Trim only lines too long for a bubble, and only their filler: keep the script's own words, names and details (a place, a sum, the thing a joke is about) and the meaning, jokes and punchlines; a line that fits a bubble is kept as written. Never invent dialogue the script does not have.
 - A run of short lines from one speaker that makes one thought is one balloon ("Sure. We have time."), not three.
 - Keep every plot beat, setup and payoff (a promise, a secret, a threat) — a reader must be able to retell the story from the pages alone.
 - Sound effects (SLAM!, BOOM!, sirens, a laugh track) go in sfx, not in dialogue or captions. Captions carry the script's own narration, condensed, only where the art cannot show it (time, place, a transition, "To be continued..."); never add narration the script does not have.
@@ -265,7 +266,12 @@ Panels:
 - Silent actions that carry the story (everyone laughs, everyone turns to look at someone, a character looks away) are drawn in the description of the panel where they happen.
 - Frame what the moment needs and vary the camera: an establishing wide shot whenever the setting is new or changes, close-ups for emotion, medium shots for conversation.
 - characters lists exactly the cast members the description puts in the frame — if the description shows the whole group, list all of them; a close-up holds one or two.
-- Every panel names its setting with the same place name as the panels before it, until the place changes or transforms; then the new name, reused from there on. A flashback names its own setting.
+- Every panel names its setting with the same place name as the panels before it, until the place changes or transforms; then the new name, reused from there on. A flashback names its own setting. A setting is where the characters are in that panel, named with the script's own words for it — not a place from the world's list they are only heading to: until they board, enter or arrive, they are still where they were (the rail platform in the city center is not yet the roller-coaster in the sky).
+- Keep the blocking. When characters hold places for a while — seated in vehicles, around a table, on two sides of a fight — decide the arrangement the first time it appears (who sits where, front to back or left to right, who is next to whom, which vehicle is whose), following every hint the script gives ("separate carts", "from the next track"), and write it in staging; every later panel there repeats it word for word and is drawn to match it. When someone or something joins or leaves (another vehicle rolls in beside them, a character is carried off), rewrite the staging once to the new arrangement — rivals and their vehicles included, whoever left dropped — and repeat that from then on. Characters held in place (strapped in, locked in, caged, tied up) stay held until the script frees them: nobody stands up or walks around. Vehicles and props the script has not brought in are not there.
+
+Scene changes:
+- When the script moves the characters to a new place (a scene heading, "they continued toward…", "eventually they reached…"), show the move: end the old scene on its last beat, then open the new one with a wide establishing panel of the place as they arrive in it, before anything happens there. The reader must see how they got from one place to the next — never cut from a picnic straight into the middle of a ride.
+- What happens to the characters at a turning point (they are grabbed, locked in, transformed) is drawn in a panel, not told in a caption.
 
 Pages:
 - A page holds 3 to 6 panels: about five for conversation, fewer and bigger when a moment needs room (a transformation, a reveal, the last page). End each page on a beat that makes the reader turn: a question, a reveal, a punchline.
@@ -295,11 +301,14 @@ const reviewerPersona = `You are the editor of a comic adaptation. A storyboard 
 
 Check every panel for:
 - a line given to the wrong speaker (runs of quoted lines usually belong to the last character who spoke or acted, unless the content clearly continues someone else; a character imitating someone is still the speaker; voices outside the cast keep their own descriptive name);
-- a line out of the script's order, repeated, or invented; a dropped line, joke, setup or payoff the story needs;
+- a line out of the script's order, repeated, or invented; a dropped line, joke, setup or payoff the story needs; a line cut down until it loses a name, a detail or the point of its joke;
 - a reaction drawn or spoken before its cause, or a character answered before they have been drawn arriving;
 - more than three balloons or two speakers in a panel, or two moments in one panel;
 - characters that do not match who the description puts in the frame;
 - a setting that does not follow the place the script is in (one place name per place, reused word for word);
+- a scene change the reader cannot follow: a new place with no establishing panel of the arrival, or a setting named for where the characters are going rather than where they are (still on the ground but named as the ride in the sky);
+- blocking that drifts: staging missing once an arrangement is set up, reworded, not updated when someone or a vehicle joins or leaves, or contradicted by a description or the script (a character in another seat or vehicle, sharing a seat they do not share, standing while locked in), or vehicles and props the script has not brought in;
+- an action the story turns on told in a caption instead of drawn;
 - sound effects in dialogue or captions, or narration the script does not have.
 
 These are not problems: lines and captions trimmed to bubble length, an off-panel speaker (a voice from the dark, someone heard from outside the frame), a narration detail the art already shows. Report only what would confuse a reader or break the art; if the draft is sound, return no problems.
@@ -484,6 +493,9 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 		if p.Setting != "" {
 			fmt.Fprintf(&b, " Setting: %s.", strings.TrimRight(p.Setting, ". "))
 		}
+		if p.Staging != "" {
+			fmt.Fprintf(&b, " Staging, the same in every panel that has it: %s.", strings.TrimRight(p.Staging, ". "))
+		}
 		if d := strings.TrimSpace(p.Description); d != "" {
 			fmt.Fprintf(&b, " %s.", strings.TrimRight(d, ". "))
 		}
@@ -536,6 +548,9 @@ func describePage(p *store.Page) string {
 		fmt.Fprintf(&b, "  Panel %d (%s)", pn.Number, pn.Shot)
 		if pn.Setting != "" {
 			fmt.Fprintf(&b, " at %s", pn.Setting)
+		}
+		if pn.Staging != "" {
+			fmt.Fprintf(&b, " (staging: %s)", pn.Staging)
 		}
 		fmt.Fprintf(&b, ": %s [%s]", pn.Description, strings.Join(pn.Characters, ", "))
 		if pn.Caption != "" {

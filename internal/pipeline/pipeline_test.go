@@ -88,12 +88,39 @@ func TestSheetPrompt(t *testing.T) {
 	}
 }
 
+func TestStoryboardKeepsBlockingAndTransitions(t *testing.T) {
+	props := panelSchema["properties"].(map[string]any)
+	if _, ok := props["staging"]; !ok || !strings.Contains(strings.Join(panelSchema["required"].([]string), ","), "staging") {
+		t.Fatal("every panel states its staging")
+	}
+	for _, want := range []string{"Keep the blocking", "stay held until the script frees them", "Scene changes:", "establishing panel of the place as they arrive", "drawn in a panel, not told in a caption"} {
+		if !strings.Contains(breakdownPersona, want) {
+			t.Fatalf("storyboard rules missing %q", want)
+		}
+	}
+	for _, want := range []string{"blocking that drifts", "a scene change the reader cannot follow", "told in a caption instead of drawn"} {
+		if !strings.Contains(reviewerPersona, want) {
+			t.Fatalf("editor checks missing %q", want)
+		}
+	}
+}
+
 func TestPagePrompt(t *testing.T) {
 	page := &store.Page{Number: 1, Title: "The Climb", Panels: []store.Panel{
 		{Number: 1, Shot: "wide", Setting: "lighthouse stairs, storm light.", Description: "Mara climbs", Characters: []string{"Mara"}, Caption: "Rain hammered.", Dialogue: []store.Line{{Character: "Mara", Text: "Hello?"}, {Character: "Deep Voice", Text: "Go back."}}, SFX: "CRASH!"},
 		{Number: 2, Shot: "close-up", Description: "She listens."},
 	}}
 	p := PagePrompt(story(), []*store.Character{mara()}, page, "")
+	if strings.Contains(p, "Staging") {
+		t.Fatal("no staging line for panels without one")
+	}
+	page.Panels[1].Staging = "two rowboats side by side: Mara in the left one."
+	if got := PagePrompt(story(), []*store.Character{mara()}, page, ""); !strings.Contains(got, "PANEL 2 (close-up shot): Staging, the same in every panel that has it: two rowboats side by side: Mara in the left one. She listens.") {
+		t.Fatalf("staging goes to the artist before the moment:\n%s", got)
+	}
+	if d := describePage(page); !strings.Contains(d, "(staging: two rowboats side by side") {
+		t.Fatalf("revisions see the staging: %s", d)
+	}
 	for _, want := range []string{"2 panels", `story title "The Lighthouse"`, "Reference image 1 = Mara", "PANEL 1 (wide shot): Setting: lighthouse stairs, storm light. Mara climbs.", "Characters present, each drawn once: Mara.", `Caption box: "Rain hammered."`, `Speech bubble from Mara: "Hello?"`, `Speech bubble from Deep Voice, who is off-panel`, `Sound effect lettered into the art: "CRASH!"`, "PANEL 2 (close-up shot): She listens.\n", "each exactly once", "in the order listed"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("page prompt missing %q:\n%s", want, p)

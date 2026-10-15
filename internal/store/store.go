@@ -647,6 +647,7 @@ type Panel struct {
 	Number      int      `json:"number"`
 	Shot        string   `json:"shot"`
 	Setting     string   `json:"setting,omitempty"` // where the panel happens, so the art keeps its location
+	Staging     string   `json:"staging,omitempty"` // who is where in that place (seats, vehicles, sides), so the art keeps its blocking
 	Description string   `json:"description"`
 	Characters  []string `json:"characters"`
 	Dialogue    []Line   `json:"dialogue"`
