@@ -215,17 +215,13 @@ func (r *Runner) Analyze(storyID int64) error {
 		if err != nil {
 			return err
 		}
-		an, err := pipeline.Analyze(ctx, r.ai, story.Script, pipeline.StyleBySlug(story.Style))
+		an, err := pipeline.Analyze(ctx, r.ai, story.Script)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(story.Title) == "" {
-			story.Title = an.Title
-		}
-		story.Logline = an.Logline
-		story.World = an.World
-		story.Step = store.StepCharacters
-		if err := r.st.UpdateStory(ctx, story); err != nil {
+		// Only what the reading found is written: the writer may be
+		// picking the look meanwhile.
+		if err := r.st.SetAnalysis(ctx, storyID, an.Title, an.Logline, an.World); err != nil {
 			return err
 		}
 		if err := r.st.DeletePages(ctx, storyID); err != nil {
@@ -321,6 +317,37 @@ func (r *Runner) DrawSheets(storyID int64) error {
 	})
 }
 
+// Restyle redraws drawn sheets in the story's new look, each from its old
+// sheet so the designs carry over. With all set every drawn sheet is
+// redrawn (the look just changed); without, only those a failed restyle
+// left behind, which still hold their old sheet. The storyboard stays;
+// drawn pages go stale and are redrawn with the new sheets.
+func (r *Runner) Restyle(storyID int64, all bool) error {
+	return r.start(storyID, "restyle", "Redrawing the cast in the new look…", 0, func(ctx context.Context, report reporter) error {
+		story, err := r.st.Story(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		chars, err := r.st.Characters(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		var todo []*store.Character
+		for _, c := range chars {
+			if c.SheetImage == "" || (!all && c.SheetStatus == store.ImageReady) {
+				continue
+			}
+			if all {
+				c.SheetStatus = store.ImagePending
+				_ = r.st.SetCharacterSheet(ctx, c.ID, c.SheetImage, store.ImagePending, "")
+			}
+			todo = append(todo, c)
+		}
+		r.invalidatePages(ctx, storyID)
+		return r.drawSheetsAs(ctx, story, todo, true, report)
+	})
+}
+
 // AllReady reports whether every character has a finished sheet: the
 // condition for storyboarding.
 func AllReady(chars []*store.Character) bool {
@@ -390,6 +417,12 @@ func lookChanged(c *store.Character, s pipeline.CharacterSpec) bool {
 
 // drawSheets renders character sheets concurrently, reporting progress.
 func (r *Runner) drawSheets(ctx context.Context, story *store.Story, chars []*store.Character, report reporter) error {
+	return r.drawSheetsAs(ctx, story, chars, false, report)
+}
+
+// drawSheetsAs is drawSheets; with restyle each sheet is redrawn from the
+// one it replaces.
+func (r *Runner) drawSheetsAs(ctx context.Context, story *store.Story, chars []*store.Character, restyle bool, report reporter) error {
 	total := len(chars)
 	if total == 0 {
 		return nil
@@ -397,19 +430,23 @@ func (r *Runner) drawSheets(ctx context.Context, story *store.Story, chars []*st
 	var mu sync.Mutex
 	done := 0
 	var firstErr error
-	report(0, total, fmt.Sprintf("Drawing character sheets (0/%d)…", total))
+	verb := "Drawing character sheets"
+	if restyle {
+		verb = "Redrawing the cast in the new look"
+	}
+	report(0, total, fmt.Sprintf("%s (0/%d)…", verb, total))
 	var wg sync.WaitGroup
 	for _, c := range chars {
 		wg.Add(1)
 		go func(c *store.Character) {
 			defer wg.Done()
-			err := r.drawSheet(ctx, story, c)
+			err := r.drawSheetAs(ctx, story, c, restyle)
 			mu.Lock()
 			done++
 			if err != nil && firstErr == nil {
 				firstErr = err
 			}
-			report(done, total, fmt.Sprintf("Drawing character sheets (%d/%d)…", done, total))
+			report(done, total, fmt.Sprintf("%s (%d/%d)…", verb, done, total))
 			mu.Unlock()
 		}(c)
 	}
@@ -421,8 +458,20 @@ func (r *Runner) drawSheets(ctx context.Context, story *store.Story, chars []*st
 }
 
 func (r *Runner) drawSheet(ctx context.Context, story *store.Story, c *store.Character) error {
+	return r.drawSheetAs(ctx, story, c, false)
+}
+
+func (r *Runner) drawSheetAs(ctx context.Context, story *store.Story, c *store.Character, restyle bool) error {
 	r.imgSem <- struct{}{}
 	defer func() { <-r.imgSem }()
+	var old []byte
+	if restyle {
+		var err error
+		if old, err = r.st.ReadImage(ctx, c.SheetImage); err != nil {
+			_ = r.st.SetCharacterSheet(ctx, c.ID, c.SheetImage, store.ImageError, err.Error())
+			return err
+		}
+	}
 	_ = r.st.SetCharacterSheet(ctx, c.ID, c.SheetImage, store.ImageGenerating, "")
 	refs, _, _ := r.references(ctx, story.ID, c.ID)
 	if len(refs) > 6 {
@@ -430,7 +479,12 @@ func (r *Runner) drawSheet(ctx context.Context, story *store.Story, c *store.Cha
 	}
 	var png []byte
 	var err error
-	if len(refs) > 0 {
+	if old != nil {
+		if len(refs) > 5 {
+			refs = refs[:5]
+		}
+		png, err = r.ai.EditImage(ctx, pipeline.RestylePrompt(story, c, len(refs)), append([][]byte{old}, refPNGs(refs)...), pipeline.SheetSize)
+	} else if len(refs) > 0 {
 		png, err = r.ai.EditImage(ctx, pipeline.SheetPrompt(story, c, len(refs)), refPNGs(refs), pipeline.SheetSize)
 	} else {
 		png, err = r.ai.GenerateImage(ctx, pipeline.SheetPrompt(story, c, 0), pipeline.SheetSize)

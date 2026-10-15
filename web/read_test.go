@@ -134,7 +134,7 @@ func TestReadToMe(t *testing.T) {
 func TestReadAStoryWithoutArt(t *testing.T) {
 	e := newEnv(t)
 	e.signup("early")
-	resp, _ := e.post("/stories", map[string][]string{"script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(map[string][]string{"script": {script}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	d := e.readJSON(base)
@@ -159,7 +159,7 @@ func TestReadMarksSoundEffects(t *testing.T) {
 	e := newEnv(t)
 	e.signup("foley")
 	sfx := "THE LAMP\n\nMARA: POOF! The lamp is lit.\nPIP: Yawn... so late.\nGRAVES: Who is there in the dark, up the old lighthouse stairs?\nMARA: Only us, and the sea, and a robot who hates heights and loves stories.\n"
-	resp, _ := e.post("/stories", map[string][]string{"title": {"Lamp"}, "script": {sfx}, "style": {"comic"}}, false)
+	resp, _ := e.create(map[string][]string{"title": {"Lamp"}, "script": {sfx}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	for _, step := range []string{"/characters/draw", "/characters/approve", "/pages/approve"} {

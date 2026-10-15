@@ -58,7 +58,7 @@ func (s *server) library(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) newStoryPage(w http.ResponseWriter, r *http.Request) {
-	render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(views.ScriptFormData{Style: pipeline.Styles[0].Slug})))
+	render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(views.ScriptFormData{})))
 }
 
 // uploads reads the "references" files of a multipart form. Size and count
@@ -153,23 +153,24 @@ func (s *server) saveRefs(r *http.Request, storyID, characterID int64, files []*
 
 func (s *server) createStory(w http.ResponseWriter, r *http.Request) {
 	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
-	f := views.ScriptFormData{Title: field(r, "title"), Script: text, ScriptHTML: clean, Style: field(r, "style")}
+	f := views.ScriptFormData{Title: field(r, "title"), Script: text, ScriptHTML: clean}
 	if len(strings.Fields(f.Script)) < 30 {
 		f.Error = "Paste at least a few paragraphs — around 30 words is the minimum for a story worth drawing."
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(f)))
 		return
 	}
-	st, err := s.st.CreateStory(r.Context(), userFrom(r.Context()).ID, f.Title, f.Script, f.ScriptHTML, pipeline.StyleBySlug(f.Style).Slug)
+	st, err := s.st.CreateStory(r.Context(), userFrom(r.Context()).ID, f.Title, f.Script, f.ScriptHTML, pipeline.Styles[0].Slug)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	// The cast is read while the writer picks the look: reading is blind to it.
 	if err := s.jobs.Analyze(st.ID); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, fmt.Sprintf("/stories/%d/characters", st.ID))
+	redirect(w, r, fmt.Sprintf("/stories/%d/look", st.ID))
 }
 
 func (s *server) storyRedirect(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +186,7 @@ func (s *server) scriptPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, ScriptHTML: editorHTML(st), Style: st.Style}
+	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, ScriptHTML: editorHTML(st)}
 	render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepScript, views.ScriptForm(f))))
 }
 
@@ -195,7 +196,7 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
-	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: text, ScriptHTML: clean, Style: field(r, "style")}
+	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: text, ScriptHTML: clean}
 	status := http.StatusUnprocessableEntity
 	switch {
 	case len(strings.Fields(f.Script)) < 30:
@@ -209,10 +210,11 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepScript, views.ScriptForm(f))))
 		return
 	}
-	changed := f.Script != st.Script || f.Style != st.Style
-	st.Title, st.Script, st.ScriptHTML, st.Style = f.Title, f.Script, f.ScriptHTML, pipeline.StyleBySlug(f.Style).Slug
+	changed := f.Script != st.Script
+	st.Title, st.Script, st.ScriptHTML = f.Title, f.Script, f.ScriptHTML
 	if changed {
-		st.Step = store.StepScript
+		// The look stays; the cast is read again and the pages re-planned.
+		st.Step = min(st.Step, store.StepCharacters)
 	}
 	if err := s.st.UpdateStory(r.Context(), st); err != nil {
 		s.fail(w, r, err)
@@ -225,7 +227,11 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	redirect(w, r, fmt.Sprintf("/stories/%d/characters", st.ID))
+	next := fmt.Sprintf("/stories/%d/characters", st.ID)
+	if st.Step < store.StepCharacters {
+		next = fmt.Sprintf("/stories/%d/look", st.ID)
+	}
+	redirect(w, r, next)
 }
 
 // editorHTML is what the editor shows for a story: its saved HTML, or the
@@ -264,7 +270,84 @@ func (s *server) deleteStory(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/stories")
 }
 
-// ---------- step 2: characters ----------
+// ---------- step 2: look ----------
+
+func (s *server) lookView(r *http.Request, st *store.Story) (views.LookView, error) {
+	chars, err := s.st.Characters(r.Context(), st.ID)
+	if err != nil {
+		return views.LookView{}, err
+	}
+	pages, err := s.st.Pages(r.Context(), st.ID)
+	if err != nil {
+		return views.LookView{}, err
+	}
+	v := views.LookView{Story: st, Style: st.Style, Started: jobs.SheetsStarted(chars)}
+	for _, c := range chars {
+		if c.SheetImage != "" {
+			v.Sheets++
+		}
+	}
+	for _, p := range pages {
+		if p.ImageStatus == store.ImageReady {
+			v.Pages++
+		}
+	}
+	return v, nil
+}
+
+func (s *server) lookPage(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.lookView(r, st)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepLook, views.LookStep(v))))
+}
+
+// updateLook saves the look and moves on to the cast. Before any sheet is
+// drawn the look is just a setting; after, the drawn cast is redrawn in it.
+func (s *server) updateLook(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.lookView(r, st)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	style := pipeline.StyleBySlug(field(r, "style")).Slug
+	changed := style != st.Style
+	if changed && (v.Started || v.Sheets > 0) && s.jobs.Working(st.ID) {
+		v.Style, v.Error = style, "The cast is still being drawn. Wait for it to finish before changing the look."
+		w.WriteHeader(http.StatusConflict)
+		render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepLook, views.LookStep(v))))
+		return
+	}
+	if changed {
+		if err := s.st.SetStyle(r.Context(), st.ID, style); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	if err := s.st.SetStep(r.Context(), st.ID, store.StepCharacters); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if changed && v.Sheets > 0 {
+		if err := s.jobs.Restyle(st.ID, true); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, fmt.Sprintf("/stories/%d/characters", st.ID))
+}
+
+// ---------- step 3: characters ----------
 
 func (s *server) charactersView(r *http.Request, st *store.Story) (views.CharactersView, error) {
 	// Jobs are read before the data they change: a job that finishes in
@@ -305,6 +388,10 @@ func (s *server) charactersView(r *http.Request, st *store.Story) (views.Charact
 func (s *server) charactersPage(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)
 	if !ok {
+		return
+	}
+	if st.Step < store.StepCharacters {
+		http.Redirect(w, r, stepURL(st), http.StatusSeeOther)
 		return
 	}
 	v, err := s.charactersView(r, st)
@@ -753,6 +840,19 @@ func (s *server) charactersDraw(w http.ResponseWriter, r *http.Request) {
 	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Drawing the character sheets", "References attached to a character are used as the artist's model."))
 }
 
+// charactersRestyle redraws the sheets a failed look change left behind.
+func (s *server) charactersRestyle(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.story(w, r)
+	if !ok {
+		return
+	}
+	if err := s.jobs.Restyle(st.ID, false); err != nil {
+		s.answerCharacters(w, r, st, errorToast(err))
+		return
+	}
+	s.answerCharacters(w, r, st, toast(components.ToastSuccess, "Redrawing the rest of the cast", "Each one keeps its design in the new look."))
+}
+
 // characterRefs attaches uploaded reference images to one character and
 // has the editor fold them into the description (and redraw, once sheets
 // exist).
@@ -974,7 +1074,7 @@ func (s *server) characterLinkPanel(w http.ResponseWriter, r *http.Request) {
 	layout.Fragments(w, r, views.LinkPanel(v, registry(lib, st.ID)))
 }
 
-// ---------- step 3: pages ----------
+// ---------- step 4: storyboard ----------
 
 func (s *server) pagesView(r *http.Request, st *store.Story) (views.PagesView, error) {
 	pages, err := s.st.Pages(r.Context(), st.ID)
@@ -1137,7 +1237,7 @@ func (s *server) pageAdjust(w http.ResponseWriter, r *http.Request) {
 	s.answerPages(w, r, st, views.CloseModal(), toast(components.ToastSuccess, fmt.Sprintf("Revising page %d", p.Number), ""))
 }
 
-// ---------- step 4: the book ----------
+// ---------- step 5: the book ----------
 
 func (s *server) bookPage(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)

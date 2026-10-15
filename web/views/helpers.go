@@ -22,6 +22,8 @@ func base(st *store.Story) string { return fmt.Sprintf("/stories/%d", st.ID) }
 
 func stepHref(st *store.Story, n int) string {
 	switch n {
+	case store.StepLook:
+		return base(st) + "/look"
 	case store.StepCharacters:
 		return base(st) + "/characters"
 	case store.StepPages:
@@ -34,14 +36,25 @@ func stepHref(st *store.Story, n int) string {
 
 func stepLabel(step int) string {
 	switch step {
+	case store.StepLook:
+		return "Step 2 of 5: look"
 	case store.StepCharacters:
-		return "Step 2 of 4: characters"
+		return "Step 3 of 5: characters"
 	case store.StepPages:
-		return "Step 3 of 4: pages"
+		return "Step 4 of 5: storyboard"
 	case store.StepBook:
-		return "Step 4 of 4: comic"
+		return "Step 5 of 5: comic"
 	}
-	return "Step 1 of 4: script"
+	return "Step 1 of 5: script"
+}
+
+// lookChangeNote says what switching the look redraws once the cast is drawn.
+func lookChangeNote(v LookView) string {
+	n := "Switching the look redraws " + plural(v.Sheets, "drawn character sheet", "drawn character sheets") + " in the new style, each keeping its design"
+	if v.Pages > 0 {
+		n += "; " + plural(v.Pages, "drawn page", "drawn pages") + " will need drawing again"
+	}
+	return n + ". Keeping the same look changes nothing."
 }
 
 func titleOr(st *store.Story) string {
@@ -138,6 +151,8 @@ func jobFailure(j *store.Job) (title, hint string) {
 		title = "Revising the cast failed"
 	case "sheets":
 		title = "Drawing the character sheets failed"
+	case "restyle":
+		title = "Redrawing the cast in the new look failed"
 	case "breakdown":
 		title = "Storyboarding failed"
 	case "pages":
@@ -183,6 +198,8 @@ func jobRetry(st *store.Story, j *store.Job, step int) (retryAction, bool) {
 		return retryAction{URL: base(st) + "/characters/read", Label: "Read the script again"}, true
 	case step == store.StepCharacters && j.Kind == "sheets":
 		return retryAction{URL: base(st) + "/characters/draw", Label: "Draw the sheets again"}, true
+	case step == store.StepCharacters && j.Kind == "restyle":
+		return retryAction{URL: base(st) + "/characters/restyle", Label: "Redraw the rest in the new look"}, true
 	case step == store.StepCharacters && j.Kind == "cast":
 		return retryAction{URL: base(st) + "/characters/adjust", Label: "Adjust the cast again", Dialog: true}, true
 	case step == store.StepPages && j.Kind == "breakdown":

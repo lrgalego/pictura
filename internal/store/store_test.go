@@ -129,12 +129,69 @@ func TestUsersAndSessions(t *testing.T) {
 	}
 }
 
+func TestSetAnalysisAndStyle(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	_, st := seed(t, s)
+	if err := s.SetStyle(ctx, st.ID, "manga"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAnalysis(ctx, st.ID, "Found", "log", "world"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Story(ctx, st.ID)
+	if got.Title != st.Title || got.Logline != "log" || got.World != "world" || got.Style != "manga" {
+		t.Fatalf("analysis keeps the writer's title and the look: %+v", got)
+	}
+	got.Title = " "
+	_ = s.UpdateStory(ctx, got)
+	_ = s.SetAnalysis(ctx, st.ID, "Found", "log", "world")
+	if got, _ = s.Story(ctx, st.ID); got.Title != "Found" {
+		t.Fatalf("a blank title is filled in: %q", got.Title)
+	}
+}
+
+func TestRenumberSteps(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, "Old", "Old", "hash")
+	ids := map[int]int64{}
+	for _, old := range []int{1, 2, 3, 4} {
+		st, _ := s.CreateStory(ctx, u.ID, "t", "script", "", "comic")
+		_ = s.ResetStep(ctx, st.ID, old)
+		ids[old] = st.ID
+	}
+	// Back to a database from before the look step.
+	if _, err := s.db.Exec(`PRAGMA user_version = 0`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	for range 2 { // the second open must not move anything again
+		if s, err = Open(dir, nil); err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+	s, _ = Open(dir, nil)
+	defer s.Close()
+	want := map[int]int{1: StepScript, 2: StepCharacters, 3: StepPages, 4: StepBook}
+	for old, id := range ids {
+		if got, _ := s.Story(ctx, id); got.Step != want[old] {
+			t.Fatalf("old step %d: got %d, want %d", old, got.Step, want[old])
+		}
+	}
+}
+
 func TestStoriesLifecycle(t *testing.T) {
 	s, _ := open(t)
 	ctx := context.Background()
 	u, st := seed(t, s)
-	if st.Step != StepScript {
-		t.Fatalf("new story should be at step 1, got %d", st.Step)
+	if st.Step != StepLook {
+		t.Fatalf("a new story has its script and is at the look, got %d", st.Step)
 	}
 	st.Title, st.Logline, st.World = "New", "log", "world"
 	if err := s.UpdateStory(ctx, st); err != nil {

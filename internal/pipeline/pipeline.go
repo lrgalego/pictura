@@ -119,7 +119,7 @@ var characterSchema = obj(map[string]any{
 var analysisSchema = obj(map[string]any{
 	"title":      str("A punchy title for the story, reused from the script if it has one"),
 	"logline":    str("One sentence pitch"),
-	"world":      str("The setting, era, mood and recurring locations, in two or three sentences, for background consistency"),
+	"world":      str("The setting, era, mood and recurring locations, in two or three sentences, for background consistency; nothing about art style or rendering"),
 	"characters": arr(characterSchema),
 }, "title", "logline", "world", "characters")
 
@@ -191,11 +191,12 @@ type PageSpec struct {
 
 // ---------- text steps ----------
 
-const analystPersona = `You are a story editor and character designer for an illustrated comic adaptation. You read scripts closely and write precise, visual, illustrator-ready descriptions. Never invent characters that are not in the script; do include unnamed but recurring ones with a descriptive name (e.g. "The Innkeeper"). Only include characters that appear on the page — skip those merely mentioned. Order characters by importance. Write names in natural capitalization ("Mara", not "MARA") even when the script shouts them. Answer only with JSON matching the schema.`
+const analystPersona = `You are a story editor and character designer for an illustrated comic adaptation. You read scripts closely and write precise, visual, illustrator-ready descriptions. Never invent characters that are not in the script; do include unnamed but recurring ones with a descriptive name (e.g. "The Innkeeper"). Only include characters that appear on the page — skip those merely mentioned. Order characters by importance. Write names in natural capitalization ("Mara", not "MARA") even when the script shouts them. Describe what things look like, never how they are drawn: no art style, medium, linework or rendering — the writer picks the look separately and can change it, so a description must suit any style. Answer only with JSON matching the schema.`
 
-// Analyze extracts the cast and the world from a script.
-func Analyze(ctx context.Context, ai AI, script string, style Style) (*Analysis, error) {
-	user := fmt.Sprintf("Art direction for the adaptation: %s.\n\nSCRIPT:\n%s", style.Direction, script)
+// Analyze extracts the cast and the world from a script. It is blind to the
+// look, so the writer can pick or change it without the cast being re-read.
+func Analyze(ctx context.Context, ai AI, script string) (*Analysis, error) {
+	user := "SCRIPT:\n" + script
 	var out Analysis
 	if err := ai.ChatJSON(ctx, analystPersona, user, nil, "analysis", analysisSchema, &out); err != nil {
 		return nil, err
@@ -209,8 +210,8 @@ func Analyze(ctx context.Context, ai AI, script string, style Style) (*Analysis,
 // AdjustCharacters revises the whole cast according to the writer's feedback.
 func AdjustCharacters(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, feedback string) ([]CharacterSpec, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Art direction: %s.\nWorld: %s\n\nCURRENT CAST:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn the full revised cast (same characters unless the feedback adds or removes some), applying the feedback and keeping everything else unchanged.\n\nSCRIPT (for reference):\n%s",
-		StyleBySlug(story.Style).Direction, story.World, describeCast(chars), feedback, story.Script)
+	fmt.Fprintf(&b, "World: %s\n\nCURRENT CAST:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn the full revised cast (same characters unless the feedback adds or removes some), applying the feedback and keeping everything else unchanged.\n\nSCRIPT (for reference):\n%s",
+		story.World, describeCast(chars), feedback, story.Script)
 	var out struct {
 		Characters []CharacterSpec `json:"characters"`
 	}
@@ -232,8 +233,8 @@ func AdjustCharacter(ctx context.Context, ai AI, story *store.Story, c *store.Ch
 	if len(refs) > 0 {
 		rule = fmt.Sprintf("\n\nThe writer attached %d reference image(s) for this character: photos, sketches, outfits or props they should match. Describe what you see in them precisely in the visual, wardrobe and items fields.", len(refs))
 	}
-	user := fmt.Sprintf("Art direction: %s.\nWorld: %s\n\nCHARACTER:\n%s\n\nWRITER'S FEEDBACK:\n%s%s\n\nReturn this one character revised per the feedback; keep the name unless asked to change it, and keep every detail the feedback does not touch.",
-		StyleBySlug(story.Style).Direction, story.World, describeCharacter(c), feedback, rule)
+	user := fmt.Sprintf("World: %s\n\nCHARACTER:\n%s\n\nWRITER'S FEEDBACK:\n%s%s\n\nReturn this one character revised per the feedback; keep the name unless asked to change it, and keep every detail the feedback does not touch.",
+		story.World, describeCharacter(c), feedback, rule)
 	var out struct {
 		Characters []CharacterSpec `json:"characters"`
 	}
@@ -396,12 +397,27 @@ func pageRange(script string) (lo, hi int) {
 // SheetPrompt is the character-sheet prompt handed to Muse Image. refs is
 // how many writer references ride along as input images.
 func SheetPrompt(story *store.Story, c *store.Character, refs int) string {
-	style := StyleBySlug(story.Style).Direction
 	lead := ""
 	if refs > 0 {
 		lead = fmt.Sprintf("The %d attached image(s) are the writer's references for this character: match the face, hair, body, outfit, colors and props they show, redrawn in the requested style. ", refs)
 	}
-	return lead + fmt.Sprintf(`Character reference sheet (model sheet) for a comic, %s. Single character: %s (%s, %s).
+	return lead + sheetBody(story, c)
+}
+
+// RestylePrompt redraws a finished sheet in a new look: the first input
+// image is the character's current sheet, followed by refs writer
+// references. The design carries over; how it is drawn does not.
+func RestylePrompt(story *store.Story, c *store.Character, refs int) string {
+	lead := "The first attached image is this character's current model sheet, drawn in a different art style. Keep the character's design exactly — face, hair, build, outfit and props — but redraw everything in the requested style: line, color, shading and rendering follow the new style, not the old sheet. "
+	if refs > 0 {
+		lead += fmt.Sprintf("The %d image(s) after it are the writer's references for this character: match what they show too. ", refs)
+	}
+	return lead + sheetBody(story, c)
+}
+
+func sheetBody(story *store.Story, c *store.Character) string {
+	style := StyleBySlug(story.Style).Direction
+	return fmt.Sprintf(`Character reference sheet (model sheet) for a comic, %s. Single character: %s (%s, %s).
 Appearance: %s
 Wardrobe: %s
 Props: %s

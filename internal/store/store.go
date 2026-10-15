@@ -205,7 +205,31 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 			return err
 		}
 	}
-	return nil
+	return s.renumberSteps()
+}
+
+// renumberSteps runs once (PRAGMA user_version 0 → 1): the look became its
+// own step 2, so stories past the script move up one.
+func (s *Store) renumberSteps() error {
+	var v int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v >= 1 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE stories SET step = step + 1 WHERE step >= 2`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`PRAGMA user_version = 1`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -357,9 +381,10 @@ func randomHex(n int) string {
 // Steps of the workflow. Step is the furthest step the story has reached.
 const (
 	StepScript     = 1
-	StepCharacters = 2
-	StepPages      = 3
-	StepBook       = 4
+	StepLook       = 2
+	StepCharacters = 3
+	StepPages      = 4
+	StepBook       = 5
 )
 
 type Story struct {
@@ -380,10 +405,11 @@ type Story struct {
 	UpdatedAt     time.Time
 }
 
+// CreateStory saves a new story; with its script written it is at the look.
 func (s *Store) CreateStory(ctx context.Context, userID int64, title, script, scriptHTML, style string) (*Story, error) {
 	t := now()
 	res, err := s.db.ExecContext(ctx, `INSERT INTO stories (user_id, title, script, script_html, style, step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, title, script, scriptHTML, style, StepScript, t, t)
+		userID, title, script, scriptHTML, style, StepLook, t, t)
 	if err != nil {
 		return nil, err
 	}
@@ -433,6 +459,21 @@ func (s *Store) StoriesByUser(ctx context.Context, userID int64) ([]*Story, erro
 func (s *Store) UpdateStory(ctx context.Context, st *Story) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE stories SET title=?, logline=?, script=?, script_html=?, style=?, world=?, step=?, updated_at=? WHERE id=?`,
 		st.Title, st.Logline, st.Script, st.ScriptHTML, st.Style, st.World, st.Step, now(), st.ID)
+	return err
+}
+
+// SetAnalysis stores what reading the script found. The title is only
+// filled in when the writer left it blank. It writes nothing else, so a
+// look picked while the script was being read is kept.
+func (s *Store) SetAnalysis(ctx context.Context, storyID int64, title, logline, world string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE stories SET title = CASE WHEN trim(title) = '' THEN ? ELSE title END, logline = ?, world = ?, updated_at = ? WHERE id = ?`,
+		title, logline, world, now(), storyID)
+	return err
+}
+
+// SetStyle changes the story's look.
+func (s *Store) SetStyle(ctx context.Context, storyID int64, style string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE stories SET style = ?, updated_at = ? WHERE id = ?`, style, now(), storyID)
 	return err
 }
 

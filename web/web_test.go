@@ -129,6 +129,24 @@ func (e *env) post(path string, form url.Values, hx bool) (*http.Response, strin
 	return resp, string(b)
 }
 
+// create posts a new story and then its look (form's "style", or the
+// default), the way the two steps are walked in the browser. It answers
+// the look's redirect to the cast, or the script's refusal.
+func (e *env) create(form url.Values) (*http.Response, string) {
+	style := form.Get("style")
+	script := url.Values{}
+	for k, v := range form {
+		if k != "style" {
+			script[k] = v
+		}
+	}
+	resp, body := e.post("/stories", script, false)
+	if resp.StatusCode != http.StatusSeeOther {
+		return resp, body
+	}
+	return e.post(resp.Header.Get("Location"), url.Values{"style": {style}}, false)
+}
+
 func (e *env) hx(req *http.Request, hx bool) {
 	if !hx {
 		return
@@ -214,12 +232,12 @@ func TestFullWorkflow(t *testing.T) {
 	e.signup("writer")
 
 	// Step 1: a script that is too short is refused.
-	resp, body := e.post("/stories", url.Values{"script": {"too short"}, "style": {"comic"}}, false)
+	resp, body := e.create(url.Values{"script": {"too short"}, "style": {"comic"}})
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at least a few paragraphs") {
 		t.Fatalf("short script: %d", resp.StatusCode)
 	}
 
-	resp, _ = e.post("/stories", url.Values{"script": {script}, "style": {"manga"}}, false)
+	resp, _ = e.create(url.Values{"script": {script}, "style": {"manga"}})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("create: %d", resp.StatusCode)
 	}
@@ -317,7 +335,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// The library shows the story with a cover.
 	_, body = e.get("/stories")
-	if !strings.Contains(body, "Step 4 of 4") || !strings.Contains(body, "/media/") {
+	if !strings.Contains(body, "Step 5 of 5") || !strings.Contains(body, "/media/") {
 		t.Fatal("library should show the finished story with a cover")
 	}
 
@@ -400,7 +418,7 @@ func TestReferenceImages(t *testing.T) {
 	if strings.Contains(body, `name="references"`) {
 		t.Fatal("script form should not offer uploads")
 	}
-	resp, _ := e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"script": {script}, "style": {"comic"}})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("create: %d", resp.StatusCode)
 	}
@@ -510,7 +528,7 @@ func TestCastRegistry(t *testing.T) {
 	e.signup("showrunner")
 
 	// Story A: cast found and drawn.
-	resp, _ := e.post("/stories", url.Values{"title": {"Book One"}, "script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"title": {"Book One"}, "script": {script}, "style": {"comic"}})
 	a := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	_, body := e.get(a + "/characters")
@@ -524,7 +542,7 @@ func TestCastRegistry(t *testing.T) {
 
 	// Story B with the same names: the roster hints at matches, the
 	// character page offers them.
-	resp, _ = e.post("/stories", url.Values{"title": {"Book Two"}, "script": {script}, "style": {"manga"}}, false)
+	resp, _ = e.create(url.Values{"title": {"Book Two"}, "script": {script}, "style": {"manga"}})
 	b := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	_, body = e.get(b + "/characters")

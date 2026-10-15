@@ -19,7 +19,7 @@ import (
 // finished walks a story through every step on the fake provider.
 func (e *env) finished(t *testing.T) (string, string) {
 	t.Helper()
-	resp, _ := e.post("/stories", url.Values{"title": {"Book"}, "script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"title": {"Book"}, "script": {script}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	e.post(base+"/characters/draw", nil, true)
@@ -92,7 +92,7 @@ func TestNotFoundAndErrors(t *testing.T) {
 		t.Fatal("home for a logged-in user")
 	}
 	// Steps not reached yet redirect back.
-	resp, _ = e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	resp, _ = e.create(url.Values{"script": {script}, "style": {"comic"}})
 	fresh := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	for _, p := range []string{fresh + "/pages", fresh + "/book"} {
@@ -130,14 +130,14 @@ func TestScriptEditing(t *testing.T) {
 	if !strings.Contains(body, "Renamed") || !strings.Contains(body, "Storyboard") {
 		t.Fatal("renaming must keep the cast and sheets")
 	}
-	// Changed style: re-read, cast rebuilt, step reset.
+	// Changed script: re-read, cast rebuilt, back to the cast with the look kept.
 	e.hold()
-	resp, _ = e.post(base+"/script", url.Values{"title": {"Renamed"}, "script": {script}, "style": {"noir"}}, false)
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("save changed: %d", resp.StatusCode)
+	resp, _ = e.post(base+"/script", url.Values{"title": {"Renamed"}, "script": {script + "\nPIP: Whirr."}}, false)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != base+"/characters" {
+		t.Fatalf("save changed: %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	// While busy, saving again is refused.
-	resp, body = e.post(base+"/script", url.Values{"title": {"x"}, "script": {script + "\nmore"}, "style": {"noir"}}, false)
+	resp, body = e.post(base+"/script", url.Values{"title": {"x"}, "script": {script + "\nmore"}}, false)
 	if resp.StatusCode != http.StatusConflict || !strings.Contains(body, "still being worked on") {
 		t.Fatalf("busy save: %d", resp.StatusCode)
 	}
@@ -147,6 +147,97 @@ func TestScriptEditing(t *testing.T) {
 	if !strings.Contains(body, "Draw the character sheets") {
 		t.Fatal("a re-read story is back in the casting phase")
 	}
+}
+
+func TestLookStep(t *testing.T) {
+	e := newEnv(t)
+	e.signup("looker")
+	// The script comes first; the look is its own step while the cast is read.
+	_, body := e.get("/stories/new")
+	if strings.Contains(body, `name="style"`) || !strings.Contains(body, "Next: pick a look") {
+		t.Fatal("the script form no longer picks the look")
+	}
+	resp, _ := e.post("/stories", url.Values{"script": {script}}, false)
+	look := resp.Header.Get("Location")
+	if resp.StatusCode != http.StatusSeeOther || !strings.HasSuffix(look, "/look") {
+		t.Fatalf("create goes to the look: %d %s", resp.StatusCode, look)
+	}
+	base := strings.TrimSuffix(look, "/look")
+	e.waitIdle()
+	resp, _ = e.get(base)
+	if resp.Header.Get("Location") != look {
+		t.Fatal("a story waiting for its look opens on it")
+	}
+	resp, _ = e.get(base + "/characters")
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != look {
+		t.Fatalf("the cast waits for the look: %d", resp.StatusCode)
+	}
+	_, body = e.get(look)
+	for _, want := range []string{`<span class="stepper__label">Look</span>`, "Meet my cast", `value="comic" checked`, "Storyboard", "You can change it later"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("look page missing %q", want)
+		}
+	}
+	resp, _ = e.post(look, url.Values{"style": {"manga"}}, false)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != base+"/characters" {
+		t.Fatalf("picking the look: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	_, body = e.get(base + "/characters")
+	if !strings.Contains(body, "Manga") || !strings.Contains(body, "Draw the character sheets") {
+		t.Fatal("the cast is read and the look kept")
+	}
+	// Before any sheet is drawn, changing it is just a setting.
+	e.post(look, url.Values{"style": {"noir"}}, false)
+	e.waitIdle()
+	if j, _ := e.st.LatestJob(context.Background(), storyID(t, base)); j.Kind != "analyze" {
+		t.Fatalf("nothing to redraw yet, got a %s job", j.Kind)
+	}
+	// Once drawn, a new look redraws the cast.
+	e.post(base+"/characters/draw", nil, true)
+	e.waitIdle()
+	_, body = e.get(look)
+	if !strings.Contains(body, "Switching the look redraws 3 drawn character sheets") || !strings.Contains(body, "Save the look") {
+		t.Fatal("the look page says what a change redraws")
+	}
+	e.hold()
+	resp, _ = e.post(look, url.Values{"style": {"pixel"}}, false)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("restyle: %d", resp.StatusCode)
+	}
+	// While the cast is redrawn the look cannot change again.
+	resp, body = e.post(look, url.Values{"style": {"storybook"}}, false)
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(body, "still being drawn") {
+		t.Fatalf("busy restyle: %d", resp.StatusCode)
+	}
+	// Keeping the same look changes nothing, even while busy.
+	resp, _ = e.post(look, url.Values{"style": {"pixel"}}, false)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("same look: %d", resp.StatusCode)
+	}
+	e.release()
+	e.waitIdle()
+	ctx := context.Background()
+	if j, _ := e.st.LatestJob(ctx, storyID(t, base)); j.Kind != "restyle" || j.Status != store.JobDone {
+		t.Fatalf("restyle job: %+v", j)
+	}
+	if st, _ := e.st.Story(ctx, storyID(t, base)); st.Style != "pixel" {
+		t.Fatalf("style: %s", st.Style)
+	}
+	// The retry button redraws what a failed restyle left behind.
+	resp, _ = e.post(base+"/characters/restyle", nil, true)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("restyle retry: %d", resp.StatusCode)
+	}
+	e.waitIdle()
+}
+
+func storyID(t *testing.T, base string) int64 {
+	t.Helper()
+	id, err := strconv.ParseInt(base[strings.LastIndex(base, "/")+1:], 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func TestCharacterEditAndAdjust(t *testing.T) {
@@ -234,7 +325,7 @@ func TestCharacterEditAndAdjust(t *testing.T) {
 func TestReferenceEdgeCases(t *testing.T) {
 	e := newEnv(t)
 	e.signup("references")
-	resp, _ := e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"script": {script}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	_, body := e.get(base + "/characters")
@@ -490,7 +581,7 @@ func TestPagesAndBookFlows(t *testing.T) {
 func TestBookWithoutArtAndEmptyStates(t *testing.T) {
 	e := newEnv(t)
 	e.signup("emptiness")
-	resp, _ := e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"script": {script}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	// No pages drawn yet: downloads are 404, lightbox is empty.
@@ -628,7 +719,7 @@ func TestAccountsMustBeEnabled(t *testing.T) {
 			t.Fatalf("%s for a disabled account: %d %s", p, resp.StatusCode, resp.Header.Get("Location"))
 		}
 	}
-	resp, _ = e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, true)
+	resp, _ = e.post("/stories", url.Values{"script": {script}}, true)
 	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("HX-Redirect") != "/pending" {
 		t.Fatalf("htmx request from a disabled account: %d", resp.StatusCode)
 	}
@@ -692,7 +783,7 @@ func TestMediaRedirectsToSignedURLs(t *testing.T) {
 	jar, _ := cookiejar.New(nil)
 	e := &env{t: t, srv: srv, runner: runner, st: st, ai: ai, client: &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
 	e.signup("signer")
-	resp, _ := e.post("/stories", url.Values{"script": {script}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"script": {script}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
 	e.post(base+"/characters/draw", nil, true)
@@ -726,7 +817,7 @@ func TestScriptEditorHTMLIsSanitizedAndKept(t *testing.T) {
 	// The editor posts HTML; the story keeps sanitized HTML and derives text.
 	html := "<p>" + strings.ReplaceAll(strings.TrimSpace(script), "\n\n", "</p><p>") + "</p><script>alert(1)</script>"
 	html = strings.ReplaceAll(html, "\n", "<br>")
-	resp, _ := e.post("/stories", url.Values{"script_html": {html}, "style": {"comic"}}, false)
+	resp, _ := e.create(url.Values{"script_html": {html}, "style": {"comic"}})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("create from editor: %d", resp.StatusCode)
 	}

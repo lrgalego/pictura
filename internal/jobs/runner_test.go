@@ -146,7 +146,7 @@ func TestAnalyzeThenDrawSheets(t *testing.T) {
 	}
 	sto, _ := e.st.Story(e.ctx, e.sto.ID)
 	chars := e.chars()
-	if sto.Step != store.StepCharacters || sto.Title == "" || sto.World == "" || len(chars) != 3 {
+	if sto.Step != store.StepLook || sto.Title == "" || sto.World == "" || len(chars) != 3 {
 		t.Fatalf("analysis result: %+v chars=%d", sto, len(chars))
 	}
 	if SheetsStarted(chars) || AllReady(chars) || AllReady(nil) {
@@ -169,6 +169,111 @@ func TestAnalyzeThenDrawSheets(t *testing.T) {
 	if Elapsed(e.job()) < 0 || Elapsed(nil) != 0 {
 		t.Fatal("Elapsed")
 	}
+}
+
+// edits records the image edits a job asks for.
+type edits struct {
+	pipeline.AI
+	mu      sync.Mutex
+	prompts []string
+	refs    []int
+}
+
+func (e *edits) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+	e.mu.Lock()
+	e.prompts, e.refs = append(e.prompts, prompt), append(e.refs, len(refs))
+	e.mu.Unlock()
+	return e.AI.EditImage(ctx, prompt, refs, size)
+}
+
+func TestRestyle(t *testing.T) {
+	e := newEnv(t)
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("analyze")
+	// A look picked while the script is read survives the analysis.
+	_ = e.st.SetStyle(e.ctx, e.sto.ID, "noir")
+	_ = e.r.Analyze(e.sto.ID)
+	e.mustDone("re-analyze")
+	if sto, _ := e.st.Story(e.ctx, e.sto.ID); sto.Style != "noir" {
+		t.Fatalf("analysis must not undo the look: %q", sto.Style)
+	}
+	_ = e.r.DrawSheets(e.sto.ID)
+	e.mustDone("draw sheets")
+	_ = e.r.Breakdown(e.sto.ID)
+	e.mustDone("breakdown")
+	_ = e.r.RenderAll(e.sto.ID)
+	e.wait()
+	before := map[int64]string{}
+	for _, c := range e.chars() {
+		before[c.ID] = c.SheetImage
+	}
+	// One character never drawn is left for the writer to draw.
+	extra := &store.Character{StoryID: e.sto.ID, Position: 9, Name: "Gull", SheetStatus: store.ImagePending}
+	_ = e.st.InsertCharacter(e.ctx, extra)
+
+	rec := &edits{AI: e.ai}
+	e.r.ai = rec
+	_ = e.st.SetStyle(e.ctx, e.sto.ID, "manga")
+	if err := e.r.Restyle(e.sto.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	e.mustDone("restyle")
+	for _, c := range e.chars() {
+		if c.ID == extra.ID {
+			if c.SheetStatus != store.ImagePending {
+				t.Fatalf("an undrawn character stays undrawn: %+v", c)
+			}
+			continue
+		}
+		if c.SheetStatus != store.ImageReady || c.SheetImage == before[c.ID] {
+			t.Fatalf("%s should be redrawn: %+v", c.Name, c)
+		}
+	}
+	if len(rec.prompts) != 3 {
+		t.Fatalf("three sheets redrawn, got %d", len(rec.prompts))
+	}
+	for i, p := range rec.prompts {
+		if !strings.HasPrefix(p, "The first attached image is this character's current model sheet") || !strings.Contains(p, "manga") || rec.refs[i] != 1 {
+			t.Fatalf("restyle draws from the old sheet in the new look: %d refs\n%s", rec.refs[i], p)
+		}
+	}
+	for _, p := range e.pages() {
+		if p.ImageStatus == store.ImageReady {
+			t.Fatalf("drawn pages go stale: %+v", p)
+		}
+	}
+	// A failed redraw fails the job and keeps the old sheets to retry from.
+	e.ai.failImage = true
+	_ = e.r.Restyle(e.sto.ID, true)
+	e.mustFail("restyle down", "image down")
+	for _, c := range e.chars() {
+		if c.ID != extra.ID && (c.SheetStatus != store.ImageError || c.SheetImage == "") {
+			t.Fatalf("a failed sheet keeps its image: %+v", c)
+		}
+	}
+	e.ai.failImage = false
+	rec.prompts = nil
+	_ = e.r.Restyle(e.sto.ID, false)
+	e.mustDone("restyle the rest")
+	if len(rec.prompts) != 3 || !jobsReady(e.chars(), extra.ID) {
+		t.Fatalf("the retry redraws what failed: %d", len(rec.prompts))
+	}
+	// Nothing left behind: the retry has no work.
+	rec.prompts = nil
+	_ = e.r.Restyle(e.sto.ID, false)
+	e.mustDone("restyle nothing")
+	if len(rec.prompts) != 0 {
+		t.Fatal("ready sheets are not redrawn by a retry")
+	}
+}
+
+func jobsReady(chars []*store.Character, skip int64) bool {
+	for _, c := range chars {
+		if c.ID != skip && c.SheetStatus != store.ImageReady {
+			return false
+		}
+	}
+	return true
 }
 
 func TestAnalyzeFailures(t *testing.T) {

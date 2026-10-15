@@ -100,7 +100,6 @@ type ScriptFormData struct {
 	Title      string
 	Script     string // plain text
 	ScriptHTML string // sanitized editor HTML
-	Style      string
 	Error      string
 }
 
@@ -117,11 +116,11 @@ templ ScriptForm(f ScriptFormData) {
 			<div class="page-head">
 				<div>
 					<h1>New story</h1>
-					<p>Paste your script, pick a look, and meet your cast.</p>
+					<p>Paste your script, then pick a look and meet your cast.</p>
 				</div>
 			</div>
 		} else {
-			<p class="note">Changing the script or the look sends it back to the editor: the cast is found again and the pages are re-planned.</p>
+			<p class="note">Changing the script sends it back to the editor: the cast is found again and the pages are re-planned. The look stays as it is.</p>
 		}
 		<form class="form script-form" method="post" action={ scriptAction(f) } onsubmit="this.elements.script_html.value = document.getElementById('script').innerHTML">
 			if f.Error != "" {
@@ -132,22 +131,6 @@ templ ScriptForm(f ScriptFormData) {
 			@components.Field(components.FieldProps{ID: "f-title", Label: "Title", For: "title", Help: "Leave it blank and the editor names the story from the script."}) {
 				@components.Input(components.InputProps{ID: "title", Name: "title", Value: f.Title, Placeholder: "The Lighthouse Keeper's Robot"})
 			}
-			<fieldset class="form choice-set">
-				<legend class="label">Look</legend>
-				<div class="styles">
-					for _, s := range pipeline.Styles {
-						<label class="style-tile">
-							<input type="radio" name="style" value={ s.Slug } checked?={ s.Slug == f.Style }/>
-							<span class="style-tile__emoji">{ s.Emoji }</span>
-							<span>
-								<span class="style-tile__name">{ s.Name }</span>
-								<br/>
-								<span class="style-tile__blurb">{ s.Blurb }</span>
-							</span>
-						</label>
-					}
-				</div>
-			</fieldset>
 			@components.Field(components.FieldProps{ID: "f-script", Label: "Script", For: "script", Help: "Screenplay format, prose, a bedtime story: anything with characters and scenes. Paste from anywhere; formatting is kept for you, the editor reads the words."}) {
 				<input type="hidden" name="script_html" value=""/>
 				@components.Editor(components.EditorProps{ID: "script", ContentHTML: f.ScriptHTML, Placeholder: "INT. LIGHTHOUSE. NIGHT.  Mara climbs the last step. Something whirs in the dark…", URL: draftURL(f)}) {
@@ -158,7 +141,7 @@ templ ScriptForm(f ScriptFormData) {
 			<div class="form__actions">
 				@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeLg}) {
 					if f.Story == nil {
-						Find my characters
+						Next: pick a look
 					} else {
 						Save and read it again
 					}
@@ -171,6 +154,63 @@ templ ScriptForm(f ScriptFormData) {
 			</div>
 		</form>
 	</div>
+}
+
+// ---------- step 2: look ----------
+
+// LookView is the look picker.
+type LookView struct {
+	Story   *store.Story
+	Style   string // the slug shown checked
+	Started bool   // sheets have been drawn or asked for
+	Sheets  int    // characters with a drawn sheet, redrawn on a change
+	Pages   int    // drawn pages that would need redrawing
+	Error   string
+}
+
+templ LookStep(v LookView) {
+	<form class="form" method="post" action={ base(v.Story) + "/look" }>
+		if v.Error != "" {
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive, Title: "Not right now"}) {
+				{ v.Error }
+			}
+		}
+		<fieldset class="form choice-set">
+			<legend class="label">Pick the look for every page</legend>
+			<div class="styles">
+				for _, s := range pipeline.Styles {
+					<label class="style-tile">
+						<input type="radio" name="style" value={ s.Slug } checked?={ s.Slug == v.Style }/>
+						<span class="style-tile__emoji">{ s.Emoji }</span>
+						<span>
+							<span class="style-tile__name">{ s.Name }</span>
+							<br/>
+							<span class="style-tile__blurb">{ s.Blurb }</span>
+						</span>
+					</label>
+				}
+			</div>
+		</fieldset>
+		if v.Sheets > 0 {
+			<p class="note">{ lookChangeNote(v) }</p>
+		} else {
+			<p class="note">You can change it later from the Look step. If the cast is already drawn by then, it is redrawn in the new look.</p>
+		}
+		<div class="form__actions">
+			@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeLg}) {
+				if v.Story.Step < store.StepCharacters {
+					Meet my cast
+				} else {
+					Save the look
+				}
+			}
+			if v.Story.Step >= store.StepCharacters {
+				@components.LinkButton(components.LinkButtonProps{Href: stepHref(v.Story, v.Story.Step), Variant: components.ButtonGhost, Size: components.SizeLg}) {
+					Cancel
+				}
+			}
+		</div>
+	</form>
 }
 
 templ DeleteDialog(st *store.Story) {
@@ -197,9 +237,11 @@ templ StoryShell(st *store.Story, step int, content templ.Component) {
 					<p class="story-head__logline">{ st.Logline }</p>
 				}
 				<div class="story-head__meta">
-					@components.Badge(components.BadgeSecondary, nil) {
-						{ pipeline.StyleBySlug(st.Style).Emoji + " " + pipeline.StyleBySlug(st.Style).Name }
-					}
+					<a href={ base(st) + "/look" } class="story-head__look" title="Change the look">
+						@components.Badge(components.BadgeSecondary, nil) {
+							{ pipeline.StyleBySlug(st.Style).Emoji + " " + pipeline.StyleBySlug(st.Style).Name }
+						}
+					</a>
 					<span class="note">{ "Updated " + st.UpdatedAt.Local().Format("Jan 2, 15:04") }</span>
 				</div>
 			</div>
@@ -221,10 +263,11 @@ templ StoryShell(st *store.Story, step int, content templ.Component) {
 
 templ stepper(st *store.Story, current int) {
 	<ol class="stepper" aria-label="Progress">
-		@stepItem(st, 1, "Script", current)
-		@stepItem(st, 2, "Characters", current)
-		@stepItem(st, 3, "Pages", current)
-		@stepItem(st, 4, "Comic", current)
+		@stepItem(st, store.StepScript, "Script", current)
+		@stepItem(st, store.StepLook, "Look", current)
+		@stepItem(st, store.StepCharacters, "Characters", current)
+		@stepItem(st, store.StepPages, "Storyboard", current)
+		@stepItem(st, store.StepBook, "Comic", current)
 	</ol>
 }
 
@@ -365,7 +408,7 @@ func orPlaceholder(p string) string {
 	return p
 }
 
-// ---------- step 2: characters ----------
+// ---------- step 3: characters ----------
 
 // CharactersView is everything the cast step renders.
 type CharactersView struct {
@@ -506,7 +549,7 @@ templ CastLibrary(groups []CastGroup) {
 }
 
 
-// ---------- step 3: pages ----------
+// ---------- step 4: storyboard ----------
 
 // PagesView serves both the breakdown step and the book step.
 type PagesView struct {
@@ -670,7 +713,7 @@ templ panelCard(pn store.Panel, i int) {
 	</div>
 }
 
-// ---------- step 4: the comic ----------
+// ---------- step 5: the comic ----------
 
 templ BookStep(v PagesView) {
 	@BookPanel(v)

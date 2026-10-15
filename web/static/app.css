@@ -284,9 +284,12 @@ h1, h2, h3, .display {
 .story-head h1 { font-size: clamp(1.7rem, 3.5vw, 2.4rem); margin: 0; }
 .story-head__logline { margin: 0.25rem 0 0; color: var(--muted-foreground); max-width: 46rem; }
 .story-head__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
+.story-head__look { text-decoration: none; border-radius: var(--radius-lg); }
+.story-head__look:hover { filter: brightness(0.95); }
+.story-head__look:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .story-head__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
-.stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin: 0.5rem 0 1.75rem; padding: 0; list-style: none; }
+.stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin: 0.5rem 0 1.75rem; padding: 0; list-style: none; }
 .stepper__item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border: 2.5px solid var(--border); border-radius: var(--radius-lg); text-decoration: none; color: var(--muted-foreground); background: var(--card); font-weight: 700; }
 .stepper__item[href]:hover { border-color: var(--ink); color: var(--foreground); }
 .stepper__item--done { color: var(--foreground); border-color: var(--border); }
@@ -296,7 +299,11 @@ h1, h2, h3, .display {
 .stepper__item--current .stepper__num { background: #221b3a; color: var(--pop); border-color: #221b3a; }
 .stepper__label { font-size: var(--text-sm); }
 @media (max-width: 720px) {
-  .stepper { grid-template-columns: 1fr 1fr; }
+  /* Five steps on a phone: numbers in a row, only the current one named. */
+  .stepper { display: flex; }
+  .stepper > li { flex: none; }
+  .stepper > li:has(.stepper__item--current) { flex: 1; min-width: 0; }
+  .stepper__item:not(.stepper__item--current) .stepper__label { display: none; }
   .stepper__label { font-size: var(--text-xs); }
 }
 

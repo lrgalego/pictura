@@ -85,6 +85,8 @@ func Router(d Deps) http.Handler {
 	mux.Handle("GET /stories/{id}/delete", auth(s.deleteDialog))
 	mux.Handle("POST /stories/{id}/delete", auth(s.deleteStory))
 
+	mux.Handle("GET /stories/{id}/look", auth(s.lookPage))
+	mux.Handle("POST /stories/{id}/look", auth(s.updateLook))
 	mux.Handle("GET /stories/{id}/characters", auth(s.charactersPage))
 	mux.Handle("GET /stories/{id}/characters/panel", auth(s.charactersPanel))
 	mux.Handle("GET /stories/{id}/characters/adjust", auth(s.castAdjustDialog))
@@ -100,6 +102,7 @@ func Router(d Deps) http.Handler {
 	mux.Handle("POST /stories/{id}/characters/{cid}/redraw", auth(s.characterRedraw))
 	mux.Handle("GET /stories/{id}/characters/{cid}/view", auth(s.characterLightbox))
 	mux.Handle("POST /stories/{id}/characters/draw", auth(s.charactersDraw))
+	mux.Handle("POST /stories/{id}/characters/restyle", auth(s.charactersRestyle))
 	mux.Handle("GET /stories/{id}/characters/{cid}/link", auth(s.characterLinkPanel))
 	mux.Handle("POST /stories/{id}/characters/{cid}/link", auth(s.characterLink))
 	mux.Handle("POST /stories/{id}/characters/{cid}/refs", auth(s.characterRefs))
@@ -298,6 +301,8 @@ func field(r *http.Request, name string) string {
 func stepURL(st *store.Story) string {
 	base := "/stories/" + strconv.FormatInt(st.ID, 10)
 	switch st.Step {
+	case store.StepLook:
+		return base + "/look"
 	case store.StepCharacters:
 		return base + "/characters"
 	case store.StepPages:

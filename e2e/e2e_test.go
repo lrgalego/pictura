@@ -180,9 +180,11 @@ func createStory(t *testing.T, page playwright.Page, title, style string) {
 	t.Helper()
 	goto_(t, page, baseURL+"/stories/new")
 	must(t, page.Fill("#title", title))
-	must(t, page.Click("label.style-tile:has-text('"+style+"')"))
 	must(t, page.Fill("#script", script))
-	must(t, page.Click("button:has-text('Find my characters')"))
+	must(t, page.Click("button:has-text('Next: pick a look')"))
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/look$`)))
+	must(t, page.Click("label.style-tile:has-text('"+style+"')"))
+	must(t, page.Click("button:has-text('Meet my cast')"))
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters$`)))
 	// The panel polls itself while the editor reads, then settles on the cast.
 	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToBeVisible())
@@ -365,7 +367,7 @@ func TestScriptToComic(t *testing.T) {
 
 	// The library shows the finished book with a cover, and the cast page lists everyone.
 	must(t, page.Click("a:has-text('Your stories')"))
-	must(t, expect.Locator(page.Locator(".book").First()).ToContainText("Step 4 of 4"))
+	must(t, expect.Locator(page.Locator(".book").First()).ToContainText("Step 5 of 5"))
 	must(t, expect.Locator(page.Locator(".book__cover img")).ToHaveCount(1))
 	must(t, page.Click("a:has-text('Your cast')"))
 	must(t, expect.Locator(page.Locator(".castlib__card")).ToHaveCount(3))

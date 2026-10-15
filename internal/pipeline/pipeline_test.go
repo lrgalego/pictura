@@ -79,6 +79,13 @@ func TestSheetPrompt(t *testing.T) {
 	if !strings.HasPrefix(p, "The 2 attached image(s) are the writer's references") {
 		t.Fatalf("reference lead missing:\n%s", p)
 	}
+	p = RestylePrompt(story(), mara(), 0)
+	if !strings.HasPrefix(p, "The first attached image is this character's current model sheet") || strings.Contains(p, "image(s) after it") || !strings.Contains(p, "watercolor") {
+		t.Fatalf("restyle prompt:\n%s", p)
+	}
+	if p = RestylePrompt(story(), mara(), 2); !strings.Contains(p, "The 2 image(s) after it are the writer's references") || !strings.Contains(p, "turnaround") {
+		t.Fatalf("restyle prompt with references:\n%s", p)
+	}
 }
 
 func TestPagePrompt(t *testing.T) {
@@ -144,11 +151,11 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 	ctx := context.Background()
 	r := &recorder{}
 	st := story()
-	an, err := Analyze(ctx, r, st.Script, StyleBySlug("noir"))
+	an, err := Analyze(ctx, r, st.Script)
 	if err != nil || len(an.Characters) == 0 {
 		t.Fatalf("analyze: %+v %v", an, err)
 	}
-	if r.schema != "analysis" || !strings.Contains(r.user, "noir") || !strings.Contains(r.user, "SCRIPT:") || !strings.Contains(r.system, "natural capitalization") {
+	if r.schema != "analysis" || strings.Contains(r.user, "Art direction") || !strings.Contains(r.system, "never how they are drawn") || !strings.Contains(r.user, "SCRIPT:") || !strings.Contains(r.system, "natural capitalization") {
 		t.Fatalf("analyze prompt: %q %q", r.schema, r.user)
 	}
 
@@ -242,7 +249,7 @@ func TestTextStepsPropagateErrors(t *testing.T) {
 	ctx := context.Background()
 	r := &recorder{err: errors.New("boom")}
 	st := story()
-	if _, err := Analyze(ctx, r, "s", Styles[0]); err == nil {
+	if _, err := Analyze(ctx, r, "s"); err == nil {
 		t.Fatal("analyze error")
 	}
 	if _, err := AdjustCharacters(ctx, r, st, nil, "f"); err == nil {
@@ -281,7 +288,7 @@ func (empty) Segment(ctx context.Context, png []byte, phrase string) ([]Region, 
 func TestTextStepsRejectEmptyAnswers(t *testing.T) {
 	ctx := context.Background()
 	st := story()
-	if _, err := Analyze(ctx, empty{}, "s", Styles[0]); err == nil || !strings.Contains(err.Error(), "no characters") {
+	if _, err := Analyze(ctx, empty{}, "s"); err == nil || !strings.Contains(err.Error(), "no characters") {
 		t.Fatalf("analyze: %v", err)
 	}
 	if _, err := AdjustCharacters(ctx, empty{}, st, nil, "f"); err == nil || !strings.Contains(err.Error(), "empty cast") {
