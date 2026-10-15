@@ -632,6 +632,8 @@ h1, h2, h3, .display {
 .reader__back:hover { color: var(--stage-ink); }
 .reader__back svg, .reader__ctl svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .reader__title { flex: 1; margin: 0; font-family: var(--font-display); font-size: 1.25rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader__notice { margin: 0; padding: 0.5rem 0.75rem; border: 2px solid #f5c542; border-radius: 0.4rem; background: rgba(245, 197, 66, 0.12); color: var(--stage-ink); font-size: var(--text-sm); }
+.reader__notice[hidden] { display: none; }
 .reader__pageno { flex: none; font-size: var(--text-sm); color: var(--stage-muted); min-width: 6.5rem; text-align: right; }
 
 .reader__stage { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; border-radius: 0.35rem; }
@@ -810,3 +812,30 @@ h1, h2, h3, .display {
   .cue, .studio__marker, .studio__outline, .cue__idea { transition: none; }
   .cue.is-flash { animation: none; }
 }
+
+/* ---------- admin ---------- */
+.admin__section { margin: 0 0 2.5rem; }
+.admin__section h2 { font-size: 1.5rem; margin: 0 0 0.85rem; }
+.admin__section h3 { font-size: 1.1rem; margin: 1.5rem 0 0.6rem; }
+.admin__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.85rem; }
+.admin__head h2 { margin: 0; }
+.admin__windows { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.admin__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: 0.75rem; margin: 0 0 0.75rem; }
+.admin__stat { padding: 0.9rem 1rem; }
+.admin__table { overflow-x: auto; margin: 0.75rem 0; }
+.admin__table td { vertical-align: top; }
+.admin__agent { display: block; font-weight: 700; }
+.admin__role { display: block; font-size: var(--text-xs); color: var(--muted-foreground); margin-top: 0.15rem; }
+.admin__fails { color: var(--destructive); }
+.admin__badges { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; }
+.admin__error { margin-top: 0.3rem; font-size: var(--text-xs); max-width: 28rem; }
+.admin__error summary { cursor: pointer; color: var(--destructive); }
+.admin__error--old summary { color: var(--muted-foreground); }
+.admin__error code, .admin__code { display: block; white-space: pre-wrap; word-break: break-word; font-size: var(--text-xs); margin-top: 0.3rem; }
+.admin__checking { display: flex; align-items: center; gap: 0.5rem; color: var(--muted-foreground); }
+.admin__services { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+.admin__recheck { grid-column: 1 / -1; }
+.admin__line { margin-bottom: 0.6rem; }
+.admin__facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.6rem 0; font-size: var(--text-sm); }
+.admin__facts dt { color: var(--muted-foreground); }
+.admin__facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

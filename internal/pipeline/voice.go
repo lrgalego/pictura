@@ -20,6 +20,16 @@ type Speaker interface {
 // ErrNoAudio is a synthesis that succeeded but carried no sound.
 var ErrNoAudio = errors.New("the voice service returned no audio")
 
+// ErrOutOfCredits is a voice service that refused for want of credits.
+var ErrOutOfCredits = errors.New("the voice service is out of credits")
+
+// OutOfCredits reports whether a stored error is the voice service refusing
+// for want of credits. Line and job errors are kept as text, so this reads
+// the text: ElevenLabs answers quota_exceeded.
+func OutOfCredits(msg string) bool {
+	return strings.Contains(msg, "quota_exceeded") || strings.Contains(msg, ErrOutOfCredits.Error())
+}
+
 // Speech is one synthesized line.
 type Speech struct {
 	Audio []byte

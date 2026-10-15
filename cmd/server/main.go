@@ -23,6 +23,7 @@ import (
 	"github.com/lrgalego/pictura/internal/meta"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/internal/usage"
 	"github.com/lrgalego/pictura/web"
 )
 
@@ -35,7 +36,9 @@ func main() {
 	healthCheck := flag.Bool("health-check", false, "probe /healthz on 127.0.0.1 and exit; used by the container healthcheck")
 	enableUser := flag.String("enable-user", "", "enable this account and exit (signing up does not enable an account)")
 	disableUser := flag.String("disable-user", "", "disable this account and exit")
-	listUsers := flag.Bool("list-users", false, "print every account with its enabled flag and exit")
+	listUsers := flag.Bool("list-users", false, "print every account with its enabled and admin flags and exit")
+	makeAdmin := flag.String("make-admin", "", "make this account an admin (it sees /admin) and exit")
+	revokeAdmin := flag.String("revoke-admin", "", "take admin away from this account and exit")
 	migrate := flag.Bool("migrate-blobs", false, "copy every image from <data>/images into the configured R2 bucket and exit")
 	flag.Parse()
 
@@ -56,8 +59,8 @@ func main() {
 		os.Exit(migrateBlobs(st, *dataDir, r2))
 	}
 
-	if *enableUser != "" || *disableUser != "" || *listUsers {
-		os.Exit(manageUsers(st, *enableUser, *disableUser, *listUsers))
+	if *enableUser != "" || *disableUser != "" || *makeAdmin != "" || *revokeAdmin != "" || *listUsers {
+		os.Exit(manageUsers(st, userOps{enable: *enableUser, disable: *disableUser, admin: *makeAdmin, unadmin: *revokeAdmin, list: *listUsers}))
 	}
 	if err := st.FailRunningJobs(context.Background()); err != nil {
 		log.Printf("reset jobs: %v", err)
@@ -68,7 +71,14 @@ func main() {
 		log.Printf("sweep: reclaimed %d orphaned image(s)", n)
 	}
 
+	// Every call to a model service is kept, for the admin page.
+	record := func(_ context.Context, c usage.Call) {
+		if err := st.RecordCall(context.Background(), c); err != nil {
+			log.Printf("record call: %v", err)
+		}
+	}
 	var ai pipeline.AI
+	var metaClient *meta.Client
 	key := strings.TrimSpace(os.Getenv("META_API_KEY"))
 	switch {
 	case *fakeAI || key == "":
@@ -89,15 +99,19 @@ func main() {
 			c.ImageModel = m
 		}
 		log.Printf("Meta Model API: text=%s image=%s", c.TextModel, c.ImageModel)
-		ai = c
+		c.Record = record
+		ai, metaClient = c, c
 	}
 
-	voice := speaker(*fakeAI)
+	voice, eleven := speaker(*fakeAI)
+	if eleven != nil {
+		eleven.Record = record
+	}
 	runner := jobs.New(st, ai, 3)
 	runner.Voice = voice
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", *host, *port),
-		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: voice}),
+		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: voice, Meta: metaClient, Eleven: eleven}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("listening on %s", srv.Addr)
@@ -106,21 +120,22 @@ func main() {
 
 // speaker picks the text-to-speech provider: ElevenLabs when
 // ELEVENLABS_API_KEY is set (Meta's API has no speech synthesis), offline
-// tones otherwise or with --fake-ai.
-func speaker(fake bool) pipeline.Speaker {
+// tones otherwise or with --fake-ai. The ElevenLabs client is returned
+// too, for the admin page; nil when offline.
+func speaker(fake bool) (pipeline.Speaker, *elevenlabs.Client) {
 	key := strings.TrimSpace(os.Getenv("ELEVENLABS_API_KEY"))
 	if fake || key == "" {
 		if key == "" {
 			log.Printf("ELEVENLABS_API_KEY is not set — voices are offline placeholder tones")
 		}
-		return pipeline.FakeVoice{}
+		return pipeline.FakeVoice{}, nil
 	}
 	c := elevenlabs.New(key)
 	if m := os.Getenv("ELEVENLABS_MODEL"); m != "" {
 		c.Model = m
 	}
 	log.Printf("ElevenLabs: model=%s", c.Model)
-	return c
+	return c, c
 }
 
 // loadEnvFile sets KEY=VALUE lines from path into the environment without
@@ -214,31 +229,41 @@ func migrateBlobs(st *store.Store, dataDir string, r2 *blob.R2) int {
 	return 0
 }
 
-// manageUsers is the operator's switch until there is an admin screen:
-// run the same binary against the data dir with --enable-user <name>.
-func manageUsers(st *store.Store, enable, disable string, list bool) int {
+// userOps are the account commands of one run: the operator's switches,
+// run with the same binary against the data dir (--enable-user <name>,
+// --make-admin <name>).
+type userOps struct {
+	enable, disable, admin, unadmin string
+	list                            bool
+}
+
+func manageUsers(st *store.Store, ops userOps) int {
 	ctx := context.Background()
 	for _, op := range []struct {
-		name    string
-		enabled bool
-	}{{enable, true}, {disable, false}} {
+		name, flag string
+		on         bool
+		set        func(context.Context, string, bool) error
+	}{
+		{ops.enable, "enabled", true, st.SetUserEnabled}, {ops.disable, "enabled", false, st.SetUserEnabled},
+		{ops.admin, "admin", true, st.SetUserAdmin}, {ops.unadmin, "admin", false, st.SetUserAdmin},
+	} {
 		if op.name == "" {
 			continue
 		}
-		if err := st.SetUserEnabled(ctx, op.name, op.enabled); err != nil {
+		if err := op.set(ctx, op.name, op.on); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", op.name, err)
 			return 1
 		}
-		fmt.Printf("%s: enabled=%v\n", strings.ToLower(op.name), op.enabled)
+		fmt.Printf("%s: %s=%v\n", strings.ToLower(op.name), op.flag, op.on)
 	}
-	if list {
+	if ops.list {
 		users, err := st.Users(ctx)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
 		for _, u := range users {
-			fmt.Printf("%-24s enabled=%-5v created %s\n", u.Username, u.Enabled, u.CreatedAt.Format("2006-01-02"))
+			fmt.Printf("%-24s enabled=%-5v admin=%-5v created %s\n", u.Username, u.Enabled, u.Admin, u.CreatedAt.Format("2006-01-02"))
 		}
 	}
 	return 0

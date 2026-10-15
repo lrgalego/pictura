@@ -104,14 +104,14 @@ func Reader(v ReaderView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</h1><span class=\"reader__pageno\" aria-live=\"polite\"></span></header><div class=\"reader__stage\"><div class=\"reader__sheet\"><img class=\"reader__img\" alt=\"\"><div class=\"reader__overlay\"><div class=\"reader__spot\" hidden></div><div class=\"reader__hl\" hidden></div><div class=\"reader__hotspots\"></div></div></div><div class=\"reader__cover\"><button type=\"button\" class=\"reader__big\" data-act=\"start\" aria-label=\"Read to me\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg></button><div class=\"reader__cover-title\">Read to me</div><div class=\"reader__status\" aria-live=\"polite\">Opening the book…</div></div><div class=\"reader__end\" hidden><div class=\"reader__end-title\">The End</div><div class=\"reader__end-actions\"><button type=\"button\" class=\"reader__pill reader__pill--pop\" data-act=\"again\">Read it again</button> <a class=\"reader__pill\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</h1><span class=\"reader__pageno\" aria-live=\"polite\"></span></header><p class=\"reader__notice\" role=\"status\" hidden></p><div class=\"reader__stage\"><div class=\"reader__sheet\"><img class=\"reader__img\" alt=\"\"><div class=\"reader__overlay\"><div class=\"reader__spot\" hidden></div><div class=\"reader__hl\" hidden></div><div class=\"reader__hotspots\"></div></div></div><div class=\"reader__cover\"><button type=\"button\" class=\"reader__big\" data-act=\"start\" aria-label=\"Read to me\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z\"></path></svg></button><div class=\"reader__cover-title\">Read to me</div><div class=\"reader__status\" aria-live=\"polite\">Opening the book…</div></div><div class=\"reader__end\" hidden><div class=\"reader__end-title\">The End</div><div class=\"reader__end-actions\"><button type=\"button\" class=\"reader__pill reader__pill--pop\" data-act=\"again\">Read it again</button> <a class=\"reader__pill\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 templ.SafeURL
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(base(v.Story) + "/book")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 43, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 44, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -124,7 +124,7 @@ func Reader(v ReaderView) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.Script)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 77, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/reader.templ`, Line: 78, Col: 23}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {

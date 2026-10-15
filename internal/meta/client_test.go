@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/lrgalego/pictura/internal/meta/metatest"
 	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/usage"
 )
 
 func client(s *metatest.Server) *Client {
@@ -261,5 +264,86 @@ func TestSegmentParsesBoxes(t *testing.T) {
 	s.Fail = &metatest.Fixture{Status: 400, Body: []byte(`{"error":{"message":"bad image","code":"invalid"}}`)}
 	if _, err := c.Segment(context.Background(), []byte("x"), "caption"); err == nil || !strings.Contains(err.Error(), "bad image") {
 		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestRecordsUsageAndLimits(t *testing.T) {
+	s := metatest.New(t)
+	c := client(s)
+	var mu sync.Mutex
+	var calls []usage.Call
+	c.Record = func(_ context.Context, call usage.Call) {
+		mu.Lock()
+		calls = append(calls, call)
+		mu.Unlock()
+	}
+	ctx := usage.WithJob(context.Background(), 7, "breakdown")
+	var out map[string]any
+	if err := c.ChatJSON(ctx, "sys", "user", nil, "pages", map[string]any{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EditImage(ctx, "a page", [][]byte{{1}}, pipeline.PageSize); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Segment(ctx, []byte{1}, "speech bubble"); err != nil {
+		t.Fatal(err)
+	}
+	fail := metatest.Load(t, "error_unauthorized.json")
+	s.Fail = &fail
+	_, _ = c.GenerateImage(context.Background(), "a sheet", pipeline.SheetSize)
+	if len(calls) != 4 {
+		t.Fatalf("calls: %+v", calls)
+	}
+	chat, img, seg, bad := calls[0], calls[1], calls[2], calls[3]
+	if chat.Provider != usage.Meta || chat.Kind != usage.Chat || chat.Op != "pages" || chat.Model != DefaultTextModel || !chat.OK ||
+		chat.InputTokens != 124 || chat.OutputTokens != 334 || chat.ReasoningTokens != 262 || chat.StoryID != 7 || chat.Job != "breakdown" || chat.At.IsZero() {
+		t.Fatalf("chat: %+v", chat)
+	}
+	if img.Kind != usage.Image || img.Op != "page" || img.InputTokens != 10791 || img.OutputTokens != 897 {
+		t.Fatalf("image: %+v", img)
+	}
+	if seg.Kind != usage.Segment || seg.Op != "speech bubble" || seg.Model != DefaultSegmentModel {
+		t.Fatalf("segment: %+v", seg)
+	}
+	if bad.OK || bad.Op != "sheet" || bad.Error == "" || bad.StoryID != 0 {
+		t.Fatalf("failure: %+v", bad)
+	}
+	if imageOp("9x9") != "image" {
+		t.Fatal("an unknown shape is just an image")
+	}
+	if !c.Limits().At.IsZero() {
+		t.Fatal("no limits until an answer carries them")
+	}
+}
+
+func TestCheckAndLimits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer k" {
+			http.Error(w, `{"error":"no"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("x-ratelimit-limit-requests", "150")
+		w.Header().Set("x-ratelimit-remaining-requests", "149")
+		w.Header().Set("x-ratelimit-limit-tokens", "3000000")
+		w.Header().Set("x-ratelimit-remaining-tokens", "2999000")
+		_, _ = w.Write([]byte(`{"data":[{"id":"muse-spark-1.3-contributor"},{"id":"muse-image-1.0"}]}`))
+	}))
+	defer srv.Close()
+	c := New("k")
+	c.BaseURL = srv.URL
+	ids, err := c.Check(context.Background())
+	if err != nil || len(ids) != 2 || ids[1] != "muse-image-1.0" {
+		t.Fatalf("check: %v %v", ids, err)
+	}
+	if l := c.Limits(); l.Requests != 150 || l.RequestsLeft != 149 || l.Tokens != 3000000 || l.TokensLeft != 2999000 || l.At.IsZero() {
+		t.Fatalf("limits: %+v", l)
+	}
+	c.APIKey = "wrong"
+	if _, err := c.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "HTTP 401") {
+		t.Fatalf("a refused key: %v", err)
+	}
+	c.BaseURL = "http://127.0.0.1:1"
+	if _, err := c.Check(context.Background()); err == nil {
+		t.Fatal("an unreachable API")
 	}
 }

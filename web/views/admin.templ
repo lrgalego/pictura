@@ -1,0 +1,702 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/lrgalego/htmx-ds/components"
+
+	"github.com/lrgalego/pictura/internal/elevenlabs"
+	"github.com/lrgalego/pictura/internal/meta"
+	"github.com/lrgalego/pictura/internal/store"
+)
+
+// ---------- view model ----------
+
+// AgentStatus is how an agent's latest call went.
+type AgentStatus string
+
+const (
+	AgentIdle      AgentStatus = "idle"    // no call yet
+	AgentOK        AgentStatus = "ok"      // the latest call worked
+	AgentFailing   AgentStatus = "failing" // the latest call failed
+	AgentNoCredits AgentStatus = "credits" // refused for want of credits
+)
+
+// AdminUsage is what calls cost: tokens, images, voice characters.
+type AdminUsage struct {
+	Calls, Failures                                       int
+	InputTokens, OutputTokens, ReasoningTokens, CachedTokens int
+	Images, Chars, Credits                                int
+	Seconds                                               float64
+	Busy                                                  time.Duration
+}
+
+// Add sums o into u.
+func (u *AdminUsage) Add(o AdminUsage) {
+	u.Calls += o.Calls
+	u.Failures += o.Failures
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.ReasoningTokens += o.ReasoningTokens
+	u.CachedTokens += o.CachedTokens
+	u.Images += o.Images
+	u.Chars += o.Chars
+	u.Credits += o.Credits
+	u.Seconds += o.Seconds
+	u.Busy += o.Busy
+}
+
+// AdminAgent is one role a model plays, with its state and usage.
+type AdminAgent struct {
+	Name, Role, Service, Model string
+	Status                     AgentStatus
+	LastAt, LastOKAt           time.Time
+	LastError                  string
+	LastErrorAt                time.Time
+	Usage                      AdminUsage
+}
+
+type AdminWindow struct{ Key, Label string }
+
+// AdminView is the admin page.
+type AdminView struct {
+	Window, WindowLabel string
+	Windows             []AdminWindow
+	Fake                bool
+	Agents              []AdminAgent
+	Total               AdminUsage
+	Stories             []store.StoryUsage
+	Active, Failed      []*store.JobRow
+	Users               []*store.User
+}
+
+// MetaLive is Meta's answer to a check right now.
+type MetaLive struct {
+	OK                   bool
+	Error                string
+	Text, Image, Segment string   // configured models
+	Missing              []string // configured models the key cannot use
+	Limits               meta.Limits
+}
+
+// ElevenLive is ElevenLabs' answer to a check right now.
+type ElevenLive struct {
+	OK           bool
+	Error        string
+	Model        string
+	Plan         *elevenlabs.Subscription
+	NoPermission bool // the key may not read the plan
+	PlanError    string
+	// The latest refusal for want of credits, and what it said.
+	LastRefusal      string
+	LastRefusalAt    time.Time
+	Quota, QuotaLeft int
+	WorkedSince      time.Time // a line was voiced after that refusal
+}
+
+// AdminLive is the services panel, checked when the page loads.
+type AdminLive struct {
+	Fake   bool
+	Meta   *MetaLive
+	Eleven *ElevenLive
+}
+
+// ---------- helpers ----------
+
+// num writes a count with thousands separators.
+func num(n int) string {
+	s := strconv.Itoa(n)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
+// short writes a large count compactly: 950, 12.3k, 4.1M.
+func short(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return strings.TrimSuffix(strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64), ".0") + "M"
+	case n >= 10_000:
+		return strconv.Itoa(n/1000) + "k"
+	case n >= 1000:
+		return strings.TrimSuffix(strconv.FormatFloat(float64(n)/1e3, 'f', 1, 64), ".0") + "k"
+	}
+	return strconv.Itoa(n)
+}
+
+// ago says how long ago a moment was, or "never".
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+}
+
+func when(t time.Time) string { return t.Local().Format("Jan 2, 15:04") }
+
+func agentBadge(s AgentStatus) (components.BadgeVariant, string) {
+	switch s {
+	case AgentOK:
+		return components.BadgeSuccess, "Working"
+	case AgentFailing:
+		return components.BadgeDestructive, "Failing"
+	case AgentNoCredits:
+		return components.BadgeDestructive, "Out of credits"
+	}
+	return components.BadgeOutline, "Not used yet"
+}
+
+func agentUse(a AdminAgent) string {
+	u := a.Usage
+	var parts []string
+	if u.InputTokens+u.OutputTokens > 0 {
+		parts = append(parts, short(u.InputTokens)+" in · "+short(u.OutputTokens)+" out")
+	}
+	if u.Images > 0 {
+		parts = append(parts, plural(u.Images, "image", "images"))
+	}
+	if u.Chars > 0 {
+		parts = append(parts, num(u.Chars)+" characters")
+	}
+	if u.Seconds > 0 {
+		parts = append(parts, strconv.FormatFloat(u.Seconds, 'f', 0, 64)+" s of sound")
+	}
+	if u.Credits > 0 {
+		parts = append(parts, num(u.Credits)+" credits")
+	}
+	if len(parts) == 0 {
+		return "—"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func windowHref(key string) string { return "/admin?window=" + key }
+
+func storyHref(id int64) string { return fmt.Sprintf("/stories/%d", id) }
+
+func jobProgress(j *store.JobRow) string {
+	if j.Total > 0 {
+		return fmt.Sprintf("%d/%d", j.Progress, j.Total)
+	}
+	return ""
+}
+
+func percent(n, of int) int {
+	if of <= 0 {
+		return 0
+	}
+	return n * 100 / of
+}
+
+// ---------- page ----------
+
+templ Admin(v AdminView) {
+	<div class="wrap admin">
+		<div class="page-head">
+			<div>
+				<h1>Admin</h1>
+				<p>How Pictura's agents are doing, what they cost, and what the services allow.</p>
+			</div>
+		</div>
+		<section class="admin__section">
+			<h2>Services</h2>
+			<div id="admin-live" hx-get="/admin/live" hx-trigger="load" hx-swap="outerHTML">
+				<div class="admin__checking">
+					@components.Spinner("sm", "")
+					<span>Checking the services…</span>
+				</div>
+			</div>
+		</section>
+		<section class="admin__section">
+			<div class="admin__head">
+				<h2>Agents</h2>
+				<nav class="admin__windows" aria-label="Period">
+					for _, w := range v.Windows {
+						if w.Key == v.Window {
+							@components.LinkButton(components.LinkButtonProps{Href: windowHref(w.Key), Size: components.SizeSm}) {
+								{ w.Label }
+							}
+						} else {
+							@components.LinkButton(components.LinkButtonProps{Href: windowHref(w.Key), Variant: components.ButtonGhost, Size: components.SizeSm}) {
+								{ w.Label }
+							}
+						}
+					}
+				</nav>
+			</div>
+			if v.Fake {
+				@components.Alert(components.AlertProps{Title: "Placeholder art"}) {
+					This server runs the offline fake models: nothing below is billed.
+				}
+			}
+			<div class="admin__stats">
+				@adminStat("Model calls", num(v.Total.Calls), plural(v.Total.Failures, "failure", "failures"))
+				@adminStat("Tokens in", short(v.Total.InputTokens), short(v.Total.CachedTokens)+" cached")
+				@adminStat("Tokens out", short(v.Total.OutputTokens), short(v.Total.ReasoningTokens)+" of them reasoning")
+				@adminStat("Images drawn", num(v.Total.Images), "Muse Image")
+				@adminStat("Voice characters", num(v.Total.Chars), voiceHint(v.Total))
+			</div>
+			<p class="note">{ v.WindowLabel + ". Counted by Pictura from each answer: Meta reports tokens per call; ElevenLabs bills credits per character of speech and per second of sound." }</p>
+			<div class="admin__table">
+				@components.Table(nil) {
+					@components.TableHeader() {
+						@components.TableRow(nil) {
+							@components.TableHead(nil) {
+								Agent
+							}
+							@components.TableHead(nil) {
+								Model
+							}
+							@components.TableHead(nil) {
+								Status
+							}
+							@components.TableHead(nil) {
+								Calls
+							}
+							@components.TableHead(nil) {
+								Usage
+							}
+						}
+					}
+					@components.TableBody() {
+						for _, a := range v.Agents {
+							@agentRow(a)
+						}
+					}
+				}
+			</div>
+		</section>
+		<section class="admin__section">
+			<h2>Jobs</h2>
+			if len(v.Active) == 0 {
+				<p class="note">Nothing is running or waiting right now.</p>
+			} else {
+				@jobTable(v.Active, false)
+			}
+			<h3>Latest failures</h3>
+			if len(v.Failed) == 0 {
+				<p class="note">No job has failed.</p>
+			} else {
+				@jobTable(v.Failed, true)
+			}
+		</section>
+		<section class="admin__section">
+			<h2>Stories</h2>
+			if len(v.Stories) == 0 {
+				<p class="note">{ "No story called a model in the " + strings.ToLower(v.WindowLabel) + "." }</p>
+			} else {
+				<div class="admin__table">
+					@components.Table(nil) {
+						@components.TableHeader() {
+							@components.TableRow(nil) {
+								@components.TableHead(nil) {
+									Story
+								}
+								@components.TableHead(nil) {
+									Writer
+								}
+								@components.TableHead(nil) {
+									Calls
+								}
+								@components.TableHead(nil) {
+									Tokens in · out
+								}
+								@components.TableHead(nil) {
+									Images
+								}
+								@components.TableHead(nil) {
+									Voice characters
+								}
+							}
+						}
+						@components.TableBody() {
+							for _, s := range v.Stories {
+								@components.TableRow(nil) {
+									@components.TableCell(nil) {
+										if s.Title != "" {
+											{ s.Title }
+										} else {
+											{ fmt.Sprintf("Story %d (deleted)", s.StoryID) }
+										}
+									}
+									@components.TableCell(nil) {
+										{ s.Username }
+									}
+									@components.TableCell(nil) {
+										{ num(s.Calls) }
+									}
+									@components.TableCell(nil) {
+										{ short(s.InputTokens) + " · " + short(s.OutputTokens) }
+									}
+									@components.TableCell(nil) {
+										{ num(s.Images) }
+									}
+									@components.TableCell(nil) {
+										{ num(s.Chars) }
+									}
+								}
+							}
+						}
+					}
+				</div>
+			}
+		</section>
+		<section class="admin__section">
+			<h2>Accounts</h2>
+			<div class="admin__table">
+				@components.Table(nil) {
+					@components.TableHeader() {
+						@components.TableRow(nil) {
+							@components.TableHead(nil) {
+								Username
+							}
+							@components.TableHead(nil) {
+								Name
+							}
+							@components.TableHead(nil) {
+								Access
+							}
+							@components.TableHead(nil) {
+								Joined
+							}
+						}
+					}
+					@components.TableBody() {
+						for _, u := range v.Users {
+							@components.TableRow(nil) {
+								@components.TableCell(nil) {
+									{ u.Username }
+								}
+								@components.TableCell(nil) {
+									{ u.DisplayName }
+								}
+								@components.TableCell(nil) {
+									<span class="admin__badges">
+										if u.Enabled {
+											@components.Badge(components.BadgeSuccess, nil) {
+												Enabled
+											}
+										} else {
+											@components.Badge(components.BadgeOutline, nil) {
+												Waiting
+											}
+										}
+										if u.Admin {
+											@components.Badge(components.BadgeDefault, nil) {
+												Admin
+											}
+										}
+									</span>
+								}
+								@components.TableCell(nil) {
+									{ u.CreatedAt.Local().Format("Jan 2, 2006") }
+								}
+							}
+						}
+					}
+				}
+			</div>
+			<p class="note">Accounts are enabled and made admins from the server: <code>--enable-user</code>, <code>--make-admin</code>.</p>
+		</section>
+	</div>
+}
+
+func voiceHint(u AdminUsage) string {
+	if u.Credits > 0 {
+		return num(u.Credits) + " credits charged"
+	}
+	return strconv.FormatFloat(u.Seconds, 'f', 0, 64) + " s of sound effects"
+}
+
+templ adminStat(label, value, hint string) {
+	@components.Card("admin__stat", nil) {
+		@components.Stat(components.StatProps{Label: label, Value: value, Hint: hint})
+	}
+}
+
+templ agentRow(a AdminAgent) {
+	@components.TableRow(nil) {
+		@components.TableCell(nil) {
+			<span class="admin__agent">{ a.Name }</span>
+			<span class="admin__role">{ a.Role }</span>
+		}
+		@components.TableCell(nil) {
+			<span class="admin__agent">{ a.Service }</span>
+			if a.Model != "" {
+				<span class="admin__role"><code>{ a.Model }</code></span>
+			}
+		}
+		@components.TableCell(nil) {
+			{{ variant, label := agentBadge(a.Status) }}
+			@components.Badge(variant, nil) {
+				{ label }
+			}
+			if a.Status != AgentIdle {
+				<span class="admin__role">{ "Last call " + ago(a.LastAt) }</span>
+			}
+			if a.LastError != "" && a.Status != AgentOK {
+				<details class="admin__error">
+					<summary>{ "Failed " + ago(a.LastErrorAt) }</summary>
+					<code>{ a.LastError }</code>
+				</details>
+			} else if a.LastError != "" {
+				<details class="admin__error admin__error--old">
+					<summary>{ "Last failure " + ago(a.LastErrorAt) }</summary>
+					<code>{ a.LastError }</code>
+				</details>
+			}
+		}
+		@components.TableCell(nil) {
+			{ num(a.Usage.Calls) }
+			if a.Usage.Failures > 0 {
+				<span class="admin__role admin__fails">{ plural(a.Usage.Failures, "failed", "failed") }</span>
+			}
+		}
+		@components.TableCell(nil) {
+			{ agentUse(a) }
+		}
+	}
+}
+
+templ jobTable(rows []*store.JobRow, failed bool) {
+	<div class="admin__table">
+		@components.Table(nil) {
+			@components.TableHeader() {
+				@components.TableRow(nil) {
+					@components.TableHead(nil) {
+						Story
+					}
+					@components.TableHead(nil) {
+						Job
+					}
+					@components.TableHead(nil) {
+						if failed {
+							Error
+						} else {
+							Doing
+						}
+					}
+					@components.TableHead(nil) {
+						When
+					}
+				}
+			}
+			@components.TableBody() {
+				for _, j := range rows {
+					@components.TableRow(nil) {
+						@components.TableCell(nil) {
+							<span class="admin__agent">{ j.Title }</span>
+							<span class="admin__role">{ j.Username }</span>
+						}
+						@components.TableCell(nil) {
+							<code>{ j.Kind }</code>
+							if !failed {
+								<span class="admin__role">{ j.Status + " " + jobProgress(j) }</span>
+							}
+						}
+						@components.TableCell(nil) {
+							if failed {
+								<details class="admin__error">
+									<summary>{ firstLine(j.Error) }</summary>
+									<code>{ j.Error }</code>
+								</details>
+							} else {
+								{ j.Message }
+							}
+						}
+						@components.TableCell(nil) {
+							if failed {
+								{ when(j.UpdatedAt) }
+							} else {
+								{ "started " + ago(j.CreatedAt) }
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}
+
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(s, "\n")
+	if len(s) > 90 {
+		return s[:90] + "…"
+	}
+	return s
+}
+
+// ---------- services, checked live ----------
+
+templ AdminLivePanel(v AdminLive) {
+	<div id="admin-live" class="admin__services">
+		if v.Fake {
+			@components.Alert(components.AlertProps{Title: "Offline models"}) {
+				This server runs the fake model and voice providers; there is no service to check.
+			}
+		}
+		if v.Meta != nil {
+			@metaCard(v.Meta)
+		}
+		if v.Eleven != nil {
+			@elevenCard(v.Eleven)
+		}
+		<div class="admin__recheck">
+			@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Attrs: templ.Attributes{"hx-get": "/admin/live", "hx-target": "#admin-live", "hx-swap": "outerHTML"}}) {
+				@components.IconRefreshCw()
+				Check again
+			}
+		</div>
+	</div>
+}
+
+templ serviceBadge(ok bool, label string) {
+	if ok {
+		@components.Badge(components.BadgeSuccess, nil) {
+			{ label }
+		}
+	} else {
+		@components.Badge(components.BadgeDestructive, nil) {
+			{ label }
+		}
+	}
+}
+
+templ metaCard(m *MetaLive) {
+	@components.Card("admin__service", nil) {
+		@components.CardHeader() {
+			@components.CardTitle() {
+				Meta Model API
+			}
+			@components.CardDescription() {
+				The writing, drawing and page-reading agents.
+			}
+		}
+		@components.CardContent() {
+			<div class="admin__line">
+				if m.OK && len(m.Missing) == 0 {
+					@serviceBadge(true, "Answering")
+				} else if m.OK {
+					@serviceBadge(false, "A model is missing")
+				} else {
+					@serviceBadge(false, "Not answering")
+				}
+			</div>
+			if m.Error != "" {
+				<code class="admin__code">{ m.Error }</code>
+			}
+			<dl class="admin__facts">
+				<dt>Text</dt>
+				<dd><code>{ m.Text }</code></dd>
+				<dt>Images</dt>
+				<dd><code>{ m.Image }</code></dd>
+				<dt>Segmentation</dt>
+				<dd><code>{ m.Segment }</code></dd>
+				if len(m.Missing) > 0 {
+					<dt>Not available to the key</dt>
+					<dd>{ strings.Join(m.Missing, ", ") }</dd>
+				}
+				if !m.Limits.At.IsZero() {
+					<dt>Requests per minute</dt>
+					<dd>{ num(m.Limits.RequestsLeft) + " of " + num(m.Limits.Requests) + " left" }</dd>
+					<dt>Tokens per minute</dt>
+					<dd>{ num(m.Limits.TokensLeft) + " of " + num(m.Limits.Tokens) + " left" }</dd>
+				}
+			</dl>
+			<p class="note">
+				if !m.Limits.At.IsZero() {
+					{ "Rate limits as Meta reported them " + ago(m.Limits.At) + ". " }
+				} else {
+					Meta reports its rate limits on model calls: they show here after the first one since the server started.
+				}
+				Meta's API has no plan or billing endpoint: the tokens under Agents are what Pictura counted.
+			</p>
+		}
+	}
+}
+
+templ elevenCard(e *ElevenLive) {
+	@components.Card("admin__service", nil) {
+		@components.CardHeader() {
+			@components.CardTitle() {
+				ElevenLabs
+			}
+			@components.CardDescription() {
+				The narrator's voices and the sound effects.
+			}
+		}
+		@components.CardContent() {
+			<div class="admin__line">
+				switch {
+					case !e.OK:
+						@serviceBadge(false, "Not answering")
+					case e.Plan != nil && e.Plan.Limit > 0 && e.Plan.Used >= e.Plan.Limit:
+						@serviceBadge(false, "Out of credits")
+					case e.Plan == nil && e.Quota > 0 && e.WorkedSince.IsZero():
+						@serviceBadge(false, "Out of credits")
+					default:
+						@serviceBadge(true, "Answering")
+				}
+			</div>
+			if e.Error != "" {
+				<code class="admin__code">{ e.Error }</code>
+			}
+			<dl class="admin__facts">
+				<dt>Voice model</dt>
+				<dd><code>{ e.Model }</code></dd>
+				if e.Plan != nil {
+					<dt>Plan</dt>
+					<dd>{ e.Plan.Tier + " (" + e.Plan.Status + ")" }</dd>
+					<dt>Credits</dt>
+					<dd>
+						{ num(e.Plan.Limit-e.Plan.Used) + " of " + num(e.Plan.Limit) + " left" }
+						@components.Progress(components.ProgressProps{Value: percent(e.Plan.Used, e.Plan.Limit)})
+					</dd>
+					if !e.Plan.Reset.IsZero() {
+						<dt>Resets</dt>
+						<dd>{ when(e.Plan.Reset) }</dd>
+					}
+					if e.Plan.VoicesLimit > 0 {
+						<dt>Voice slots</dt>
+						<dd>{ num(e.Plan.VoicesUsed) + " of " + num(e.Plan.VoicesLimit) }</dd>
+					}
+				} else if e.Quota > 0 {
+					<dt>Credits</dt>
+					<dd>
+						{ num(e.QuotaLeft) + " of " + num(e.Quota) + " left when a line was refused " + ago(e.LastRefusalAt) }
+						if !e.WorkedSince.IsZero() {
+							<span class="admin__role">{ "Lines have been voiced since (" + ago(e.WorkedSince) + "): credits were added or reset." }</span>
+						}
+					</dd>
+				}
+			</dl>
+			if e.NoPermission {
+				<p class="note">The API key may not read the plan, so its tier, credits and reset date can't be shown. Give the key the <code>user_read</code> permission in ElevenLabs (Developers → API keys) to see them here.</p>
+			} else if e.PlanError != "" {
+				<code class="admin__code">{ e.PlanError }</code>
+			}
+		}
+	}
+}

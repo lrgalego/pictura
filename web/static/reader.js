@@ -14,7 +14,7 @@
   var spot = $('.reader__spot'), hl = $('.reader__hl'), hotspots = $('.reader__hotspots');
   var cover = $('.reader__cover'), status = $('.reader__status'), end = $('.reader__end');
   var wait = $('.reader__wait'), waitMsg = $('.reader__wait-msg'), retryBtn = $('[data-act=retry-page]');
-  var who = $('.reader__who'), pageNo = $('.reader__pageno');
+  var who = $('.reader__who'), pageNo = $('.reader__pageno'), notice = $('.reader__notice');
   var playBtn = $('[data-act=play]'), speedBtn = $('[data-act=speed]');
   var turnBtn = $('[data-act=turn]'), zoomBtn = $('[data-act=zoom]');
 
@@ -77,6 +77,8 @@
   function update() {
     var p = page();
     var pages = drawn().length;
+    notice.textContent = data.notice || '';
+    notice.hidden = !data.notice;
     if (!pages) {
       status.textContent = 'No pages are drawn yet. Draw the comic first.';
       return;

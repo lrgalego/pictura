@@ -297,7 +297,11 @@ templ cue(v StudioView, l *store.PageLine, n int) {
 			}
 			if state == "failed" {
 				<details class="cue__error">
-					<summary>Couldn't make this one — why?</summary>
+					if pipeline.OutOfCredits(l.Error) {
+						<summary>The voice service is out of credits — this line waits for a top-up</summary>
+					} else {
+						<summary>Couldn't make this one — why?</summary>
+					}
 					<code>{ l.Error }</code>
 				</details>
 			}

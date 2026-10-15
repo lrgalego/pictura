@@ -15,9 +15,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/usage"
 )
 
 const (
@@ -35,6 +37,115 @@ type Client struct {
 	ImageModel   string
 	SegmentModel string
 	HTTP         *http.Client
+	// Record, when set, is told about every request and its token usage.
+	Record usage.Recorder
+
+	mu     sync.Mutex
+	limits Limits
+}
+
+// Limits are the rate limits the API reported on its latest answer: per
+// minute, requests and tokens, and what was left of each.
+type Limits struct {
+	Requests, RequestsLeft int
+	Tokens, TokensLeft     int
+	At                     time.Time // zero until an answer carried them
+}
+
+// Limits returns the rate limits seen last.
+func (c *Client) Limits() Limits {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limits
+}
+
+func (c *Client) noteLimits(h http.Header) {
+	if h.Get("x-ratelimit-limit-requests") == "" {
+		return
+	}
+	n := func(k string) int { v, _ := strconv.Atoi(h.Get(k)); return v }
+	c.mu.Lock()
+	c.limits = Limits{
+		Requests: n("x-ratelimit-limit-requests"), RequestsLeft: n("x-ratelimit-remaining-requests"),
+		Tokens: n("x-ratelimit-limit-tokens"), TokensLeft: n("x-ratelimit-remaining-tokens"),
+		At: time.Now(),
+	}
+	c.mu.Unlock()
+}
+
+// usageBlock is the token count an answer carries.
+type usageBlock struct {
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		InputTokens      int `json:"input_tokens"`
+		OutputTokens     int `json:"output_tokens"`
+		Completion       *struct {
+			Reasoning int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+		Prompt *struct {
+			Cached int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+	} `json:"usage"`
+}
+
+// record reports one request with the tokens its answer counted.
+func (c *Client) record(ctx context.Context, call usage.Call, start time.Time, body []byte, err error) {
+	if c.Record == nil {
+		return
+	}
+	call.Provider, call.Duration, call.OK = usage.Meta, time.Since(start), err == nil
+	if err != nil {
+		call.Error = err.Error()
+	}
+	var u usageBlock
+	if json.Unmarshal(body, &u) == nil && u.Usage != nil {
+		call.InputTokens = u.Usage.PromptTokens + u.Usage.InputTokens
+		call.OutputTokens = u.Usage.CompletionTokens + u.Usage.OutputTokens
+		if u.Usage.Completion != nil {
+			call.ReasoningTokens = u.Usage.Completion.Reasoning
+		}
+		if u.Usage.Prompt != nil {
+			call.CachedTokens = u.Usage.Prompt.Cached
+		}
+	}
+	c.Record(ctx, usage.Stamp(ctx, call))
+}
+
+// Check lists the models the key can use, to tell a working key from a
+// broken one or an outage, and returns their ids.
+func (c *Client) Check(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("meta api: %w", err)
+	}
+	defer resp.Body.Close()
+	c.noteLimits(resp.Header)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("meta api /models: HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, m := range out.Data {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
 }
 
 // New returns a client with the default models and a generous timeout —
@@ -58,7 +169,12 @@ type apiError struct {
 	} `json:"error"`
 }
 
-func (c *Client) post(ctx context.Context, path string, body any, out any) error {
+// post sends one request and decodes the answer into out, reporting the
+// call (call holds its kind, model and op) to Record.
+func (c *Client) post(ctx context.Context, path string, body any, out any, call usage.Call) (err error) {
+	start := time.Now()
+	var data []byte
+	defer func() { c.record(ctx, call, start, data, err) }()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -74,7 +190,8 @@ func (c *Client) post(ctx context.Context, path string, body any, out any) error
 		return fmt.Errorf("meta api: %w", err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	c.noteLimits(resp.Header)
+	data, err = io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return err
 	}
@@ -161,7 +278,7 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string, images []pip
 		},
 	}
 	var resp chatResponse
-	if err := c.post(ctx, "/chat/completions", req, &resp); err != nil {
+	if err := c.post(ctx, "/chat/completions", req, &resp, usage.Call{Kind: usage.Chat, Model: c.TextModel, Op: schemaName}); err != nil {
 		return err
 	}
 	if len(resp.Choices) == 0 {
@@ -227,9 +344,20 @@ func (c *Client) EditImage(ctx context.Context, prompt string, refs [][]byte, si
 	return c.image(ctx, "/images/edits", req)
 }
 
+// imageOp names the agent an image is drawn for from its shape.
+func imageOp(size string) string {
+	switch size {
+	case pipeline.SheetSize:
+		return "sheet"
+	case pipeline.PageSize:
+		return "page"
+	}
+	return "image"
+}
+
 func (c *Client) image(ctx context.Context, path string, req imageRequest) ([]byte, error) {
 	var resp imageResponse
-	if err := c.post(ctx, path, req, &resp); err != nil {
+	if err := c.post(ctx, path, req, &resp, usage.Call{Kind: usage.Image, Model: c.ImageModel, Op: imageOp(req.Size)}); err != nil {
 		return nil, err
 	}
 	if len(resp.Data) == 0 {
@@ -296,7 +424,7 @@ func (c *Client) Segment(ctx context.Context, png []byte, phrase string) ([]pipe
 		},
 	}}}
 	var resp segmentResponse
-	if err := c.post(ctx, "/responses", req, &resp); err != nil {
+	if err := c.post(ctx, "/responses", req, &resp, usage.Call{Kind: usage.Segment, Model: c.SegmentModel, Op: phrase}); err != nil {
 		return nil, err
 	}
 	var out []pipeline.Region

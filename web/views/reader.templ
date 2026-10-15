@@ -20,6 +20,7 @@ templ Reader(v ReaderView) {
 			<h1 class="reader__title">{ titleOr(v.Story) }</h1>
 			<span class="reader__pageno" aria-live="polite"></span>
 		</header>
+		<p class="reader__notice" role="status" hidden></p>
 		<div class="reader__stage">
 			<div class="reader__sheet">
 				<img class="reader__img" alt=""/>

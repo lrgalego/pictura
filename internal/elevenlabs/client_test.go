@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/usage"
 )
 
 // server answers every request with a recorded body and remembers what it
@@ -294,5 +295,102 @@ func TestRetries(t *testing.T) {
 	defer cancel()
 	if _, err := slow.Speak(ctx, "hi", "v"); err != context.DeadlineExceeded {
 		t.Fatalf("cancelled wait: %v", err)
+	}
+}
+
+func TestOutOfCreditsAndRecording(t *testing.T) {
+	var hits atomic.Int32
+	quota := `{"detail":{"type":"invalid_request","code":"quota_exceeded","message":"This request exceeds your quota of 10000. You have 0 credits remaining, while 18 credits are required for this request.","status":"quota_exceeded"}}`
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if strings.Contains(r.URL.Path, "sound") {
+			w.Header().Set("character-cost", "40")
+			_, _ = io.WriteString(w, "ID3")
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, quota)
+	}))
+	defer s.Close()
+	c := client(s)
+	var mu sync.Mutex
+	var calls []usage.Call
+	c.Record = func(_ context.Context, call usage.Call) {
+		mu.Lock()
+		calls = append(calls, call)
+		mu.Unlock()
+	}
+	ctx := usage.WithJob(context.Background(), 3, "narrate")
+	_, err := c.Speak(ctx, "Héllo there", "v")
+	if !errors.Is(err, pipeline.ErrOutOfCredits) || !pipeline.OutOfCredits(err.Error()) || !strings.Contains(err.Error(), "0 credits remaining") {
+		t.Fatalf("out of credits: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("running out of credits is not retried: %d requests", hits.Load())
+	}
+	if _, err := c.Sound(ctx, "a door slams", 1.5); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls: %+v", calls)
+	}
+	speech, sound := calls[0], calls[1]
+	if speech.Provider != usage.ElevenLabs || speech.Kind != usage.Speech || speech.OK || speech.Chars != 11 || speech.Model != DefaultModel || speech.StoryID != 3 || speech.Job != "narrate" || !pipeline.OutOfCredits(speech.Error) {
+		t.Fatalf("speech: %+v", speech)
+	}
+	if sound.Kind != usage.Sound || !sound.OK || sound.Seconds != 1.5 || sound.Credits != 40 || sound.Model != SoundModel {
+		t.Fatalf("sound: %+v", sound)
+	}
+	if errorIs([]byte(`nope`), "x") || errorIs([]byte(`{"detail":"text"}`), "text") || !errorIs([]byte(`{"detail":{"status":"x"}}`), "x") || !errorIs([]byte(`{"detail":{"code":"y","status":"x"}}`), "y") {
+		t.Fatal("errorIs")
+	}
+}
+
+func TestSubscriptionAndCheck(t *testing.T) {
+	allowed := true
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("xi-api-key") != "sk_test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}`)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/user/subscription":
+			if !allowed {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = io.WriteString(w, `{"detail":{"type":"authentication_error","code":"unauthorized","message":"The API key you used is missing the permission user_read to execute this operation.","status":"missing_permissions"}}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"tier":"free","status":"active","character_count":10000,"character_limit":10000,"next_character_count_reset_unix":1793000000,"voice_slots_used":1,"voice_limit":3}`)
+		case "/v2/voices":
+			if r.URL.Query().Get("page_size") != "1" {
+				t.Errorf("check asks for one voice: %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `{"voices":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer s.Close()
+	c := New("sk_test")
+	c.BaseURL = s.URL + "/v1"
+	sub, err := c.Subscription(context.Background())
+	if err != nil || sub.Tier != "free" || sub.Used != 10000 || sub.Limit != 10000 || sub.Reset.Unix() != 1793000000 || sub.VoicesLimit != 3 {
+		t.Fatalf("subscription: %+v %v", sub, err)
+	}
+	if err := c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	allowed = false
+	if _, err := c.Subscription(context.Background()); !errors.Is(err, ErrNoPermission) {
+		t.Fatalf("missing permission: %v", err)
+	}
+	c.APIKey = "wrong"
+	if err := c.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "Invalid API key") {
+		t.Fatalf("a bad key: %v", err)
+	}
+	c.BaseURL = "http://127.0.0.1:1/v1"
+	if err := c.Check(context.Background()); err == nil {
+		t.Fatal("an unreachable API")
 	}
 }

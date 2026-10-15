@@ -837,6 +837,14 @@ type countingVoice struct {
 	mu    sync.Mutex
 	calls map[string]int
 	fail  bool
+	err   error // what a failure says; "voice down" when nil
+}
+
+func (c *countingVoice) failure() error {
+	if c.err != nil {
+		return c.err
+	}
+	return errors.New("voice down")
 }
 
 func (c *countingVoice) Speak(ctx context.Context, text, voice string) (*pipeline.Speech, error) {
@@ -848,7 +856,7 @@ func (c *countingVoice) Speak(ctx context.Context, text, voice string) (*pipelin
 	fail := c.fail
 	c.mu.Unlock()
 	if fail {
-		return nil, errors.New("voice down")
+		return nil, c.failure()
 	}
 	return pipeline.FakeVoice{}.Speak(ctx, text, voice)
 }
@@ -862,7 +870,7 @@ func (c *countingVoice) Sound(ctx context.Context, prompt string, seconds float6
 	fail := c.fail
 	c.mu.Unlock()
 	if fail {
-		return nil, errors.New("voice down")
+		return nil, c.failure()
 	}
 	return pipeline.FakeVoice{}.Sound(ctx, prompt, seconds)
 }
@@ -988,14 +996,60 @@ func TestNarrateAfterDrawing(t *testing.T) {
 	}
 }
 
+func TestNarrateOutOfCredits(t *testing.T) {
+	e := newEnv(t)
+	voice := &countingVoice{fail: true, err: fmt.Errorf("elevenlabs: This request exceeds your quota of 10000. You have 0 credits remaining (quota_exceeded): %w", pipeline.ErrOutOfCredits)}
+	e.r.Voice = voice
+	e.drawnBook()
+	j := e.job()
+	if j.Kind != "narrate" || j.Status != store.JobError || !pipeline.OutOfCredits(j.Error) || !strings.Contains(j.Error, "lines have no audio") {
+		t.Fatalf("out of credits fails the job and says so: %+v", j)
+	}
+	// Credits back: preparing the book again makes just the silent lines.
+	voice.fail = false
+	before := voice.total()
+	_ = e.r.Narrate(e.sto.ID)
+	e.mustDone("narrate with credits")
+	lines, _ := e.st.StoryLines(e.ctx, e.sto.ID)
+	n := 0
+	for _, ls := range lines {
+		for _, l := range ls {
+			if len(l.Words) == 0 {
+				continue
+			}
+			n++
+			if l.Audio == "" || l.Error != "" {
+				t.Fatalf("line still silent: %+v", l)
+			}
+		}
+	}
+	if got := voice.total() - before; got != n {
+		t.Fatalf("made %d clips, want the %d silent lines", got, n)
+	}
+}
+
+func TestSilentLines(t *testing.T) {
+	w := []store.LineWord{{Text: "hi"}}
+	if silentLines([]*store.PageLine{{Words: w, Audio: "a.mp3"}, {}}) != nil {
+		t.Fatal("every line voiced (a wordless one does not count)")
+	}
+	s := silentLines([]*store.PageLine{{Words: w, Audio: "a.mp3"}, {Words: w, Error: "voice down"}, {Words: w, Error: "x (quota_exceeded)"}, {Words: w}})
+	if s.Missing != 3 || s.Total != 4 || !pipeline.OutOfCredits(s.Cause) || s.Error() != "3 of 4 lines have no audio: x (quota_exceeded)" {
+		t.Fatalf("silent lines: %+v", s)
+	}
+	if s := silentLines([]*store.PageLine{{Words: w}}); s.Cause != "no audio was made" {
+		t.Fatalf("a line with no error still counts: %+v", s)
+	}
+}
+
 func TestNarrateFailures(t *testing.T) {
 	e := newEnv(t)
 	voice := &countingVoice{fail: true}
 	e.r.Voice = voice
 	e.drawnBook()
-	// Lines that cannot be made do not fail the book: each records why,
-	// the pages count as settled (they play without those lines).
-	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobDone {
+	// Lines that cannot be made fail the job, saying how many and why;
+	// each line records its error and the pages still play without them.
+	if j := e.job(); j.Kind != "narrate" || j.Status != store.JobError || !strings.Contains(j.Error, "lines have no audio: voice down") {
 		t.Fatalf("narrate job: %+v", j)
 	}
 	sto, _ := e.st.Story(e.ctx, e.sto.ID)
@@ -1013,7 +1067,7 @@ func TestNarrateFailures(t *testing.T) {
 	// Preparing again on its own does not spend on lines that failed.
 	calls := voice.total()
 	_ = e.r.Narrate(e.sto.ID)
-	e.mustDone("narrate again")
+	e.mustFail("narrate again", "lines have no audio")
 	if voice.total() != calls {
 		t.Fatalf("failed lines were retried automatically: %d calls", voice.total()-calls)
 	}

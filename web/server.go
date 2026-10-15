@@ -19,7 +19,9 @@ import (
 	"github.com/lrgalego/htmx-ds/layout"
 	"github.com/lrgalego/htmx-ds/theme"
 
+	"github.com/lrgalego/pictura/internal/elevenlabs"
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/meta"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
@@ -34,6 +36,9 @@ type Deps struct {
 	Jobs  *jobs.Runner
 	Fake  bool             // the offline provider is in use; the UI says so
 	Voice pipeline.Speaker // text to speech; nil means the offline tones
+	// The live services, for the admin page's checks; nil when offline.
+	Meta   *meta.Client
+	Eleven *elevenlabs.Client
 }
 
 type server struct {
@@ -41,12 +46,14 @@ type server struct {
 	jobs    *jobs.Runner
 	fake    bool
 	voice   pipeline.Speaker
+	meta    *meta.Client
+	eleven  *elevenlabs.Client
 	samples sampleCache
 }
 
 // Router wires the app.
 func Router(d Deps) http.Handler {
-	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake, voice: d.Voice}
+	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake, voice: d.Voice, meta: d.Meta, eleven: d.Eleven}
 	if s.voice == nil {
 		s.voice = pipeline.FakeVoice{}
 	}
@@ -141,6 +148,9 @@ func Router(d Deps) http.Handler {
 	mux.Handle("POST /prefs/studio", auth(s.toggleStudio))
 	mux.Handle("GET /stories/{id}/download.pdf", auth(s.downloadPDF))
 	mux.Handle("GET /stories/{id}/download.zip", auth(s.downloadZip))
+
+	mux.Handle("GET /admin", s.requireAdmin(s.adminPage))
+	mux.Handle("GET /admin/live", s.requireAdmin(s.adminLive))
 
 	mux.Handle("GET /media/{name}", auth(s.media))
 	mux.Handle("GET /media/t/{name}", auth(s.thumb))

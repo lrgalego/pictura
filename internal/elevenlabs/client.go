@@ -14,9 +14,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lrgalego/pictura/internal/pipeline"
+	"github.com/lrgalego/pictura/internal/usage"
 )
 
 const (
@@ -41,7 +44,9 @@ type Client struct {
 	// Backoff is the wait before each retry; its length is how many
 	// retries a transient failure gets.
 	Backoff []time.Duration
-	sem     chan struct{}
+	// Record, when set, is told about every request and what it cost.
+	Record usage.Recorder
+	sem    chan struct{}
 }
 
 // transient marks a failure worth another attempt: the network, a rate
@@ -118,16 +123,42 @@ func (c *Client) retry(ctx context.Context, call func() (*pipeline.Speech, error
 	}
 }
 
-// failure turns an HTTP answer into an error, marking the retryable ones.
+// failure turns an HTTP answer into an error, marking the retryable ones
+// and the account running out of credits (pipeline.ErrOutOfCredits).
 func failure(status int, body []byte) error {
-	err := fmt.Errorf("elevenlabs: %s", errorMessage(status, body))
+	msg := errorMessage(status, body)
+	if errorIs(body, "quota_exceeded") {
+		return fmt.Errorf("elevenlabs: %s: %w", msg, pipeline.ErrOutOfCredits)
+	}
+	err := fmt.Errorf("elevenlabs: %s", msg)
 	if status == http.StatusTooManyRequests || status >= 500 {
 		return transient{err}
 	}
 	return err
 }
 
-func (c *Client) speakOnce(ctx context.Context, text, voiceID string) (*pipeline.Speech, error) {
+// record reports one request: what was asked, what the answer said it
+// cost (the character-cost header), and how it went.
+func (c *Client) record(ctx context.Context, call usage.Call, start time.Time, h http.Header, err error) {
+	if c.Record == nil {
+		return
+	}
+	call.Provider, call.Duration, call.OK = usage.ElevenLabs, time.Since(start), err == nil
+	if err != nil {
+		call.Error = err.Error()
+	}
+	if h != nil {
+		call.Credits, _ = strconv.Atoi(h.Get("character-cost"))
+	}
+	c.Record(ctx, usage.Stamp(ctx, call))
+}
+
+func (c *Client) speakOnce(ctx context.Context, text, voiceID string) (sp *pipeline.Speech, err error) {
+	start := time.Now()
+	var header http.Header
+	defer func() {
+		c.record(ctx, usage.Call{Kind: usage.Speech, Model: c.Model, Op: "narration", Chars: utf8.RuneCountInString(text)}, start, header, err)
+	}()
 	payload, err := json.Marshal(speechRequest{Text: text, ModelID: c.Model})
 	if err != nil {
 		return nil, err
@@ -147,6 +178,7 @@ func (c *Client) speakOnce(ctx context.Context, text, voiceID string) (*pipeline
 		return nil, transient{fmt.Errorf("elevenlabs: %w", err)}
 	}
 	defer resp.Body.Close()
+	header = resp.Header
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		return nil, transient{err}
@@ -162,7 +194,7 @@ func (c *Client) speakOnce(ctx context.Context, text, voiceID string) (*pipeline
 	if err != nil || len(audio) == 0 {
 		return nil, transient{fmt.Errorf("elevenlabs: %w", pipeline.ErrNoAudio)}
 	}
-	sp := &pipeline.Speech{Audio: audio, Ext: "mp3"}
+	sp = &pipeline.Speech{Audio: audio, Ext: "mp3"}
 	if a := out.Alignment; a != nil {
 		sp.Words = pipeline.WordsFromChars(a.Characters, a.Starts, a.Ends)
 	}
@@ -185,7 +217,12 @@ func (c *Client) Sound(ctx context.Context, prompt string, seconds float64) (*pi
 	return c.retry(ctx, func() (*pipeline.Speech, error) { return c.soundOnce(ctx, prompt, seconds) })
 }
 
-func (c *Client) soundOnce(ctx context.Context, prompt string, seconds float64) (*pipeline.Speech, error) {
+func (c *Client) soundOnce(ctx context.Context, prompt string, seconds float64) (sp *pipeline.Speech, err error) {
+	start := time.Now()
+	var header http.Header
+	defer func() {
+		c.record(ctx, usage.Call{Kind: usage.Sound, Model: SoundModel, Op: "sound effects", Seconds: seconds}, start, header, err)
+	}()
 	// Adherence over creativity: the description names the sound wanted.
 	payload, err := json.Marshal(soundRequest{Text: prompt, DurationSeconds: seconds, PromptInfluence: 0.6})
 	if err != nil {
@@ -206,6 +243,7 @@ func (c *Client) soundOnce(ctx context.Context, prompt string, seconds float64) 
 		return nil, transient{fmt.Errorf("elevenlabs: %w", err)}
 	}
 	defer resp.Body.Close()
+	header = resp.Header
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return nil, transient{err}
@@ -217,6 +255,92 @@ func (c *Client) soundOnce(ctx context.Context, prompt string, seconds float64) 
 		return nil, transient{fmt.Errorf("elevenlabs: %w", pipeline.ErrNoAudio)}
 	}
 	return &pipeline.Speech{Audio: data, Ext: "mp3"}, nil
+}
+
+// errorIs reports whether ElevenLabs' error body carries a machine code,
+// in its code or its status: a missing permission comes as code
+// "unauthorized", status "missing_permissions".
+func errorIs(body []byte, code string) bool {
+	var e apiError
+	if json.Unmarshal(body, &e) != nil || len(e.Detail) == 0 {
+		return false
+	}
+	var d struct {
+		Code   string `json:"code"`
+		Status string `json:"status"`
+	}
+	return json.Unmarshal(e.Detail, &d) == nil && (d.Code == code || d.Status == code)
+}
+
+// ---------- account ----------
+
+// Subscription is the plan and its credits, as the account reports them.
+type Subscription struct {
+	Tier        string    `json:"tier"`
+	Status      string    `json:"status"`
+	Used        int       `json:"character_count"`
+	Limit       int       `json:"character_limit"`
+	ResetUnix   int64     `json:"next_character_count_reset_unix"`
+	VoicesUsed  int       `json:"voice_slots_used"`
+	VoicesLimit int       `json:"voice_limit"`
+	CanExtend   bool      `json:"can_extend_character_limit"`
+	Reset       time.Time `json:"-"`
+}
+
+// ErrNoPermission is the API key lacking a permission the call needs.
+var ErrNoPermission = errors.New("the API key lacks the permission for this")
+
+// Subscription reads the plan, its credit limit and what is used. The key
+// needs the user_read permission; without it this is ErrNoPermission.
+func (c *Client) Subscription(ctx context.Context) (*Subscription, error) {
+	var sub Subscription
+	if err := c.get(ctx, "/user/subscription", &sub); err != nil {
+		return nil, err
+	}
+	if sub.ResetUnix > 0 {
+		sub.Reset = time.Unix(sub.ResetUnix, 0)
+	}
+	return &sub, nil
+}
+
+// Check makes the cheapest authenticated call there is (one voice of the
+// library), to tell a working key from a broken one or an outage.
+func (c *Client) Check(ctx context.Context) error {
+	var out json.RawMessage
+	base := c.BaseURL
+	if u, err := url.Parse(base); err == nil && u.Path == "/v1" {
+		u.Path = "/v2"
+		base = u.String()
+	}
+	return c.getURL(ctx, base+"/voices?page_size=1", &out)
+}
+
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	return c.getURL(ctx, c.BaseURL+path, out)
+}
+
+func (c *Client) getURL(ctx context.Context, endpoint string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("xi-api-key", c.APIKey)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("elevenlabs: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 300 {
+		if errorIs(data, "missing_permissions") {
+			return fmt.Errorf("elevenlabs: %s: %w", errorMessage(resp.StatusCode, data), ErrNoPermission)
+		}
+		return failure(resp.StatusCode, data)
+	}
+	return json.Unmarshal(data, out)
 }
 
 // errorMessage pulls the human message out of ElevenLabs' error body, whose

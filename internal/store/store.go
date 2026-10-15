@@ -205,6 +205,9 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 			return err
 		}
 	}
+	if err := s.migrateAdmin(); err != nil {
+		return err
+	}
 	return s.renumberSteps()
 }
 
@@ -273,6 +276,7 @@ type User struct {
 	DisplayName  string
 	PasswordHash string
 	Enabled      bool // signing up does not enable an account; an operator does
+	Admin        bool // sees the admin page; set by an operator
 	CreatedAt    time.Time
 }
 
@@ -289,7 +293,7 @@ func (s *Store) CreateUser(ctx context.Context, username, displayName, hash stri
 	return s.UserByID(ctx, id)
 }
 
-const userCols = `id, username, display_name, password_hash, enabled, created_at`
+const userCols = `id, username, display_name, password_hash, enabled, admin, created_at`
 
 func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id))
@@ -322,7 +326,7 @@ func (s *Store) Users(ctx context.Context) ([]*User, error) {
 	for rows.Next() {
 		var u User
 		var created string
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &created); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &u.Admin, &created); err != nil {
 			return nil, err
 		}
 		u.CreatedAt = parseTime(created)
@@ -334,7 +338,7 @@ func (s *Store) Users(ctx context.Context) ([]*User, error) {
 func (s *Store) scanUser(row *sql.Row) (*User, error) {
 	var u User
 	var created string
-	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &created); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Enabled, &u.Admin, &created); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -1455,6 +1459,13 @@ func (s *Store) SetLineAudio(ctx context.Context, lineID int64, voice, audio str
 // SetLineError records why a line's clip could not be made.
 func (s *Store) SetLineError(ctx context.Context, lineID int64, msg string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET error = ? WHERE id = ?`, msg, lineID)
+	return err
+}
+
+// ClearLineErrorsLike makes due again a page's lines that failed with an
+// error holding the given text.
+func (s *Store) ClearLineErrorsLike(ctx context.Context, pageID int64, text string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE page_lines SET error = '' WHERE page_id = ? AND instr(error, ?) > 0`, pageID, text)
 	return err
 }
 

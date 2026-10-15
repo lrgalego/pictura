@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 )
 
@@ -172,6 +173,9 @@ func jobFailure(j *store.Job) (title, hint string) {
 	default:
 		title = "The last step failed"
 	}
+	if pipeline.OutOfCredits(j.Error) {
+		return "The voice service is out of credits", OutOfCreditsHint
+	}
 	switch e := strings.ToLower(j.Error); {
 	case strings.Contains(e, "server restart"):
 		hint = "Pictura restarted while this was running. Nothing is lost; start it again."
@@ -184,6 +188,10 @@ func jobFailure(j *store.Job) (title, hint string) {
 	}
 	return title, hint
 }
+
+// OutOfCreditsHint is what a writer is told when ElevenLabs refuses for
+// want of credits.
+const OutOfCreditsHint = "ElevenLabs, the voice service, has no credits left, so some lines have no voice yet. Everything already made is kept, and the book plays without the missing lines. Once credits are added, try again: only the silent lines are made."
 
 // retryAction starts a failed job again from the step that shows it. A
 // revision needs the notes again, so it reopens the adjust dialog.

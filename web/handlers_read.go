@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"net/http"
 	"sync"
@@ -60,12 +61,14 @@ type readPageData struct {
 }
 
 type readData struct {
-	Title     string         `json:"title"`
-	Preparing bool           `json:"preparing"`
-	Progress  int            `json:"progress"`
-	Total     int            `json:"total"`
-	Message   string         `json:"message"`
-	Pages     []readPageData `json:"pages"`
+	Title     string `json:"title"`
+	Preparing bool   `json:"preparing"`
+	Progress  int    `json:"progress"`
+	Total     int    `json:"total"`
+	Message   string `json:"message"`
+	// Notice tells the listener that lines are skipped, and why.
+	Notice string         `json:"notice,omitempty"`
+	Pages  []readPageData `json:"pages"`
 }
 
 // readState is the reader's view of a story: every page with its lines
@@ -124,8 +127,34 @@ func (s *server) readState(r *http.Request, st *store.Story) (readData, error) {
 		}
 		out.Pages = append(out.Pages, d)
 	}
+	out.Notice = readNotice(pages, lines)
 	s.framePanels(r.Context(), pages, out.Pages)
 	return out, nil
+}
+
+// readNotice says why lines are silent: above all the voice service being
+// out of credits, which no retry fixes until someone tops it up.
+func readNotice(pages []*store.Page, lines map[int64][]*store.PageLine) string {
+	silent, credits := 0, false
+	for _, p := range pages {
+		credits = credits || pipeline.OutOfCredits(p.ReadingError)
+		for _, l := range lines[p.ID] {
+			if len(l.Words) == 0 || l.Audio != "" || l.Error == "" {
+				continue
+			}
+			silent++
+			credits = credits || pipeline.OutOfCredits(l.Error)
+		}
+	}
+	switch {
+	case credits:
+		return "The voice service is out of credits, so some lines are silent and are skipped. They'll be voiced once credits are added."
+	case silent == 1:
+		return "1 line couldn't be voiced and is skipped."
+	case silent > 1:
+		return fmt.Sprintf("%d lines couldn't be voiced and are skipped.", silent)
+	}
+	return ""
 }
 
 // wholePage frames a line that is in no panel.

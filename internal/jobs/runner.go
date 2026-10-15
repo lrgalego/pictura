@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
+	"github.com/lrgalego/pictura/internal/usage"
 )
 
 // Runner is a per-story scheduler. Nothing is ever refused: work is queued
@@ -170,7 +172,8 @@ func (r *Runner) pump(storyID int64) {
 
 func (r *Runner) execute(storyID int64, t *task) {
 	defer r.wg.Done()
-	ctx := context.Background()
+	// Every model call the job makes is counted against its story.
+	ctx := usage.WithJob(context.Background(), storyID, t.kind)
 	_ = r.st.StartJob(ctx, t.job.ID)
 	report := func(progress, total int, message string) {
 		_ = r.st.UpdateJob(ctx, t.job.ID, progress, total, message)
@@ -1018,6 +1021,7 @@ func (r *Runner) Narrate(storyID int64) error {
 		var mu sync.Mutex
 		done := 0
 		var firstErr error
+		var silent SilentLines
 		report(0, total, fmt.Sprintf("Getting the voices ready (0/%d pages)…", total))
 		sem := make(chan struct{}, 3)
 		var wg sync.WaitGroup
@@ -1027,9 +1031,21 @@ func (r *Runner) Narrate(storyID int64) error {
 			go func(p *store.Page) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				err := r.narratePage(ctx, story, chars, p)
+				// Lines refused for want of credits get another try once the
+				// book is prepared again. Other failures are not retried on
+				// their own (the reader prepares by itself); a page retry
+				// or the studio makes them again.
+				err := r.st.ClearLineErrorsLike(ctx, p.ID, "quota_exceeded")
+				if err == nil {
+					err = r.narratePage(ctx, story, chars, p)
+				}
 				mu.Lock()
 				done++
+				var sl *SilentLines
+				if errors.As(err, &sl) {
+					silent.add(sl)
+					err = nil
+				}
 				if err != nil {
 					log.Printf("narrate story %d page %d: %v", storyID, p.Number, err)
 					_ = r.st.SetReadingError(ctx, p.ID, err.Error())
@@ -1045,8 +1061,54 @@ func (r *Runner) Narrate(storyID int64) error {
 		if firstErr != nil {
 			return fmt.Errorf("some pages could not be read aloud: %w", firstErr)
 		}
+		if silent.Missing > 0 {
+			return &silent
+		}
 		return nil
 	})
+}
+
+// SilentLines is narration that left lines without audio: the pages play
+// without them, but the job did not do its work and says why.
+type SilentLines struct {
+	Missing, Total int
+	Cause          string // the error of one silent line, the voice service's credits first
+}
+
+func (s *SilentLines) Error() string {
+	return fmt.Sprintf("%d of %d lines have no audio: %s", s.Missing, s.Total, s.Cause)
+}
+
+func (s *SilentLines) add(o *SilentLines) {
+	s.Missing += o.Missing
+	s.Total += o.Total
+	if s.Cause == "" || (pipeline.OutOfCredits(o.Cause) && !pipeline.OutOfCredits(s.Cause)) {
+		s.Cause = o.Cause
+	}
+}
+
+// silentLines counts a page's lines left without audio after narration.
+func silentLines(lines []*store.PageLine) *SilentLines {
+	var s SilentLines
+	for _, l := range lines {
+		if len(l.Words) == 0 {
+			continue
+		}
+		s.Total++
+		if l.Audio != "" {
+			continue
+		}
+		s.Missing++
+		cause := l.Error
+		if cause == "" {
+			cause = "no audio was made"
+		}
+		s.add(&SilentLines{Cause: cause})
+	}
+	if s.Missing == 0 {
+		return nil
+	}
+	return &s
 }
 
 // NarrationReady reports whether a drawn page can be read aloud as it is:
@@ -1171,7 +1233,17 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 		}()
 	}
 	wg.Wait()
-	return r.st.SetReadingError(ctx, p.ID, "")
+	if err := r.st.SetReadingError(ctx, p.ID, ""); err != nil {
+		return err
+	}
+	// The page plays with what was made; lines left silent fail the job.
+	if lines, err = r.st.PageLines(ctx, p.ID); err != nil {
+		return err
+	}
+	if s := silentLines(lines); s != nil {
+		return s
+	}
+	return nil
 }
 
 // remeasure places a page's stored lines on its art again (pipeline.
@@ -1399,7 +1471,10 @@ func (r *Runner) NarratePage(storyID, pageID int64) error {
 			return err
 		}
 		if err := r.narratePage(ctx, story, chars, p); err != nil {
-			_ = r.st.SetReadingError(ctx, p.ID, err.Error())
+			var sl *SilentLines
+			if !errors.As(err, &sl) {
+				_ = r.st.SetReadingError(ctx, p.ID, err.Error())
+			}
 			return fmt.Errorf("page %d could not be read aloud: %w", p.Number, err)
 		}
 		return nil

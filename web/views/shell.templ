@@ -108,6 +108,12 @@ templ Topbar(p ShellProps) {
 								@components.IconPlus()
 								New story
 							}
+							if p.User.Admin {
+								@components.DropdownLink("/admin", nil) {
+									@components.IconSettings()
+									Admin
+								}
+							}
 							@components.DropdownSeparator()
 						}
 						@components.DropdownItem(templ.Attributes{"hx-post": "/logout", "hx-swap": "none"}) {
