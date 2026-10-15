@@ -413,7 +413,7 @@ func draw(prompt, size string, page bool) []byte {
 	if len(label) > 80 {
 		label = label[:80] + "…"
 	}
-	text(img, 20, h-14, "PLACEHOLDER · "+label, ink)
+	text(img, 20, h-5, "PLACEHOLDER · "+label, ink)
 	var buf bytes.Buffer
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()

@@ -4,9 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/lrgalego/pictura/internal/pipeline"
 )
+
+// The panels found per image are kept for the most recent images only;
+// what is kept for a name is never replaced.
+func TestPanelCacheForgetsTheOldest(t *testing.T) {
+	c := &boxCache{items: map[string][]pipeline.Box{}}
+	for i := 0; i < panelCacheSize+3; i++ {
+		c.put(strconv.Itoa(i), []pipeline.Box{{X2: float64(i)}})
+	}
+	if len(c.items) != panelCacheSize || len(c.order) != panelCacheSize {
+		t.Fatalf("kept %d/%d", len(c.items), len(c.order))
+	}
+	if _, ok := c.get("0"); ok {
+		t.Fatal("the oldest should be forgotten")
+	}
+	c.put("5", nil)
+	if b, ok := c.get("5"); !ok || len(b) != 1 || b[0].X2 != 5 {
+		t.Fatalf("kept for 5: %+v %v", b, ok)
+	}
+}
 
 func (e *env) readJSON(base string) readData {
 	e.t.Helper()
@@ -57,6 +79,24 @@ func TestReadToMe(t *testing.T) {
 			}
 		}
 	}
+	// The camera goes panel to panel: the placeholder grid's six panels
+	// are found in the art, and every line is framed by the panel it is
+	// lettered in.
+	for _, p := range d.Pages {
+		if len(p.Panels) != 6 {
+			t.Fatalf("page %d panels: %+v", p.Number, p.Panels)
+		}
+		for _, l := range p.Lines {
+			f, in := l.Frame, false
+			for _, pn := range p.Panels {
+				in = in || pn == f
+			}
+			if !in || l.Box.X1 < f.X1 || l.Box.Y1 < f.Y1 || l.Box.X2 > f.X2 || l.Box.Y2 > f.Y2 {
+				t.Fatalf("line %q framed by %+v, its box %+v", l.Text, f, l.Box)
+			}
+		}
+	}
+
 	// Clips are served like images, to their owner only.
 	resp, body = e.get(d.Pages[0].Lines[0].Audio)
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "audio/wav" || !strings.HasPrefix(body, "RIFF") {
