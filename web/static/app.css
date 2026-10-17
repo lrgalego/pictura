@@ -298,12 +298,27 @@ h1, h2, h3, .display {
 .stepper__item--done .stepper__num { background: var(--success); color: var(--success-foreground); border-color: var(--success); }
 .stepper__item--current .stepper__num { background: #221b3a; color: var(--pop); border-color: #221b3a; }
 .stepper__label { font-size: var(--text-sm); }
-@media (max-width: 720px) {
-  /* Five steps on a phone: numbers in a row, only the current one named. */
-  .stepper { display: flex; }
-  .stepper > li { flex: none; }
-  .stepper > li:has(.stepper__item--current) { flex: 1; min-width: 0; }
+@media (max-width: 900px) {
+  /* Narrow screens: a track of numbered dots joined by a line, the
+     current step a pill with its name. The steps before it are links. */
+  .stepper { display: flex; align-items: center; gap: 0; margin: 0.25rem 0 1.5rem; }
+  .stepper > li { display: flex; align-items: center; flex: 1 1 auto; }
+  .stepper > li:first-child { flex: none; }
+  .stepper > li + li::before { content: ""; flex: 1 1 auto; min-width: 0.35rem; height: 2.5px; margin: 0 0.3rem; border-radius: 2px; background: var(--border); }
+  .stepper > li:has(.stepper__item--done) + li::before { background: var(--success); }
+  .stepper__item { padding: 0.2rem; border: 0; background: none; border-radius: 999px; box-shadow: none; gap: 0.45rem; }
+  .stepper__item[href]:hover { color: var(--foreground); }
+  .stepper__item[href]:hover .stepper__num { box-shadow: 0 0 0 3px var(--ring); }
   .stepper__item:not(.stepper__item--current) .stepper__label { display: none; }
+  .stepper__item--current { padding: 0.2rem 0.85rem 0.2rem 0.2rem; border: 2.5px solid var(--ink); background: var(--pop); box-shadow: 3px 3px 0 var(--ink); }
+  .stepper__num { width: 1.9rem; height: 1.9rem; background: var(--card); }
+  .stepper__label { font-size: var(--text-sm); white-space: nowrap; }
+}
+@media (max-width: 400px) {
+  .stepper > li + li::before { margin: 0 0.15rem; }
+  .stepper__item { gap: 0.35rem; padding: 0.15rem; }
+  .stepper__item--current { padding-right: 0.65rem; }
+  .stepper__num { width: 1.65rem; height: 1.65rem; font-size: 0.85rem; }
   .stepper__label { font-size: var(--text-xs); }
 }
 
