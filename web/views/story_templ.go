@@ -80,7 +80,7 @@ func Library(cards []StoryCard) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg, Class: "page-head__new"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -978,14 +978,14 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 			templ_7745c5c3_Var41 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<div class=\"wrap\"><div class=\"story-head\"><div><h1>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<div class=\"wrap\"><div class=\"story-head\"><div class=\"story-head__text\"><a href=\"/stories\" class=\"story-head__back\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m15 18-6-6 6-6\"></path></svg> Stories</a><h1>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(titleOr(st))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 235, Col: 21}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 239, Col: 21}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 		if templ_7745c5c3_Err != nil {
@@ -1003,7 +1003,7 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(st.Logline)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 237, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 241, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -1021,7 +1021,7 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 		var templ_7745c5c3_Var44 templ.SafeURL
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinURLErrs(base(st) + "/look")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 240, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 244, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
@@ -1046,7 +1046,7 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 			var templ_7745c5c3_Var46 string
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(pipeline.StyleBySlug(st.Style).Emoji + " " + pipeline.StyleBySlug(st.Style).Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 242, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 246, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 			if templ_7745c5c3_Err != nil {
@@ -1065,7 +1065,7 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 		var templ_7745c5c3_Var47 string
 		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs("Updated " + st.UpdatedAt.Local().Format("Jan 2, 15:04"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 245, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 249, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 		if templ_7745c5c3_Err != nil {
@@ -1091,13 +1091,13 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, " Edit script")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, " <span class=\"story-head__label\">Edit script</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.LinkButton(components.LinkButtonProps{Href: base(st) + "/script", Variant: components.ButtonOutline, Size: components.SizeSm}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var48), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.LinkButton(components.LinkButtonProps{Href: base(st) + "/script", Variant: components.ButtonOutline, Size: components.SizeSm, Attrs: templ.Attributes{"aria-label": "Edit script"}}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var48), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1117,13 +1117,13 @@ func StoryShell(st *store.Story, step int, content templ.Component) templ.Compon
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " Delete")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " <span class=\"story-head__label\">Delete</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.DialogTrigger(components.DialogTriggerProps{URL: base(st) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm}}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var49), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.DialogTrigger(components.DialogTriggerProps{URL: base(st) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm, Attrs: templ.Attributes{"aria-label": "Delete story"}}}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var49), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1233,7 +1233,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(n))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 278, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 282, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 			if templ_7745c5c3_Err != nil {
@@ -1246,7 +1246,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var53 string
 			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 279, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 283, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 			if templ_7745c5c3_Err != nil {
@@ -1269,7 +1269,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var55 templ.SafeURL
 			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinURLErrs(stepHref(st, n))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 282, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 286, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 			if templ_7745c5c3_Err != nil {
@@ -1301,7 +1301,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(n))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 287, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 291, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 				if templ_7745c5c3_Err != nil {
@@ -1315,7 +1315,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var58 string
 			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 290, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 294, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 			if templ_7745c5c3_Err != nil {
@@ -1333,7 +1333,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(n))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 294, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 298, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 			if templ_7745c5c3_Err != nil {
@@ -1346,7 +1346,7 @@ func stepItem(st *store.Story, n int, label string, current int) templ.Component
 			var templ_7745c5c3_Var60 string
 			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 295, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 299, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 			if templ_7745c5c3_Err != nil {
@@ -1425,7 +1425,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 				var templ_7745c5c3_Var64 string
 				templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs("Waiting its turn: " + j.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 311, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 315, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 				if templ_7745c5c3_Err != nil {
@@ -1443,7 +1443,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 				var templ_7745c5c3_Var65 string
 				templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(j.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 313, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 317, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 				if templ_7745c5c3_Err != nil {
@@ -1461,7 +1461,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 			var templ_7745c5c3_Var66 string
 			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(jobs.Elapsed(j).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 315, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 319, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 			if templ_7745c5c3_Err != nil {
@@ -1506,7 +1506,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 				var templ_7745c5c3_Var68 string
 				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(hint)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 326, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 330, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 				if templ_7745c5c3_Err != nil {
@@ -1541,7 +1541,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 							var templ_7745c5c3_Var70 string
 							templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(a.Label)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 332, Col: 17}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 336, Col: 17}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 							if templ_7745c5c3_Err != nil {
@@ -1577,7 +1577,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 							var templ_7745c5c3_Var72 string
 							templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(a.Label)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 337, Col: 17}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 341, Col: 17}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 							if templ_7745c5c3_Err != nil {
@@ -1598,7 +1598,7 @@ func JobBar(st *store.Story, j *store.Job, step int) templ.Component {
 				var templ_7745c5c3_Var73 string
 				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(j.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 343, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 347, Col: 21}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 				if templ_7745c5c3_Err != nil {
@@ -1655,7 +1655,7 @@ func stepPanel(pollURL string, running bool) templ.Component {
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(pollURL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 356, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 360, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 			if templ_7745c5c3_Err != nil {
@@ -1746,7 +1746,7 @@ func FeedbackDialog(p FeedbackDialogProps) templ.Component {
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Action)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 383, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 387, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 			if templ_7745c5c3_Err != nil {
@@ -1759,7 +1759,7 @@ func FeedbackDialog(p FeedbackDialogProps) templ.Component {
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Target)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 383, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 387, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
 			if templ_7745c5c3_Err != nil {
@@ -1802,7 +1802,7 @@ func FeedbackDialog(p FeedbackDialogProps) templ.Component {
 				var templ_7745c5c3_Var81 string
 				templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(p.Submit)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 391, Col: 15}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 395, Col: 15}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 				if templ_7745c5c3_Err != nil {
@@ -2121,7 +2121,7 @@ func castToolbar(v CharactersView, bottom bool) templ.Component {
 				var templ_7745c5c3_Var92 string
 				templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(v.Characters), "character", "characters") + " in the cast. Open one to adjust or redraw it; storyboard when the looks are right.")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 460, Col: 165}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 464, Col: 165}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 				if templ_7745c5c3_Err != nil {
@@ -2139,7 +2139,7 @@ func castToolbar(v CharactersView, bottom bool) templ.Component {
 				var templ_7745c5c3_Var93 string
 				templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(v.Characters), "character", "characters") + " found. Open any of them to check the description, add references or reuse a familiar face; then draw the sheets.")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 462, Col: 195}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 466, Col: 195}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 				if templ_7745c5c3_Err != nil {
@@ -2189,7 +2189,7 @@ func castToolbar(v CharactersView, bottom bool) templ.Component {
 			var templ_7745c5c3_Var95 string
 			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(base(v.Story) + "/characters/approve")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 471, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 475, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 			if templ_7745c5c3_Err != nil {
@@ -2387,7 +2387,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 					var templ_7745c5c3_Var101 string
 					templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue("/media/t/" + g.Character.SheetImage)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 524, Col: 55}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 528, Col: 55}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 					if templ_7745c5c3_Err != nil {
@@ -2400,7 +2400,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 					var templ_7745c5c3_Var102 string
 					templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(g.Character.Name + " character sheet")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 524, Col: 101}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 528, Col: 101}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 					if templ_7745c5c3_Err != nil {
@@ -2418,7 +2418,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 					var templ_7745c5c3_Var103 string
 					templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(initials(g.Character.Name))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 527, Col: 65}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 531, Col: 65}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 					if templ_7745c5c3_Err != nil {
@@ -2436,7 +2436,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 				var templ_7745c5c3_Var104 string
 				templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(g.Character.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 532, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 536, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
 				if templ_7745c5c3_Err != nil {
@@ -2449,7 +2449,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 				var templ_7745c5c3_Var105 string
 				templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(g.Character.Visual)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 533, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 537, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 				if templ_7745c5c3_Err != nil {
@@ -2473,7 +2473,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 					var templ_7745c5c3_Var106 templ.SafeURL
 					templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinURLErrs(base(o) + "/characters")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 540, Col: 42}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 544, Col: 42}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
 					if templ_7745c5c3_Err != nil {
@@ -2486,7 +2486,7 @@ func CastLibrary(groups []CastGroup) templ.Component {
 					var templ_7745c5c3_Var107 string
 					templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(titleOr(o))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 540, Col: 57}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 544, Col: 57}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 					if templ_7745c5c3_Err != nil {
@@ -2733,7 +2733,7 @@ func pagesToolbar(v PagesView, bottom bool) templ.Component {
 			var templ_7745c5c3_Var116 string
 			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(v.Pages), "page", "pages") + ", " + plural(panelCount(v.Pages), "panel", "panels") + ". Read the plan, ask for changes, then draw.")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 596, Col: 166}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 600, Col: 166}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 			if templ_7745c5c3_Err != nil {
@@ -2807,7 +2807,7 @@ func pagesToolbar(v PagesView, bottom bool) templ.Component {
 		var templ_7745c5c3_Var119 string
 		templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.ResolveAttributeValue(base(v.Story) + "/pages/approve")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 607, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 611, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 		if templ_7745c5c3_Err != nil {
@@ -2912,7 +2912,7 @@ func pageCard(st *store.Story, p *store.Page, busy bool, state string) templ.Com
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("page-%d", p.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 627, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 631, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 		if templ_7745c5c3_Err != nil {
@@ -2925,7 +2925,7 @@ func pageCard(st *store.Story, p *store.Page, busy bool, state string) templ.Com
 		var templ_7745c5c3_Var125 string
 		templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Page %d", p.Number))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 630, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 634, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
 		if templ_7745c5c3_Err != nil {
@@ -2943,7 +2943,7 @@ func pageCard(st *store.Story, p *store.Page, busy bool, state string) templ.Com
 			var templ_7745c5c3_Var126 string
 			templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(p.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 632, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 636, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 			if templ_7745c5c3_Err != nil {
@@ -3078,7 +3078,7 @@ func pageCard(st *store.Story, p *store.Page, busy bool, state string) templ.Com
 		var templ_7745c5c3_Var130 string
 		templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(p.Summary)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 667, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 671, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 		if templ_7745c5c3_Err != nil {
@@ -3140,7 +3140,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 		var templ_7745c5c3_Var132 string
 		templ_7745c5c3_Var132, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(fmt.Sprintf("--i: %d", i))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 682, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 686, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 		if templ_7745c5c3_Err != nil {
@@ -3153,7 +3153,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 		var templ_7745c5c3_Var133 string
 		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Panel %d", pn.Number))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 684, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 688, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 		if templ_7745c5c3_Err != nil {
@@ -3179,7 +3179,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 				var templ_7745c5c3_Var135 string
 				templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(pn.Shot)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 687, Col: 14}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 691, Col: 14}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 				if templ_7745c5c3_Err != nil {
@@ -3204,7 +3204,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 			var templ_7745c5c3_Var136 string
 			templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(pn.Setting)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 692, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 696, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
 			if templ_7745c5c3_Err != nil {
@@ -3222,7 +3222,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 		var templ_7745c5c3_Var137 string
 		templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(pn.Description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 694, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 698, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 		if templ_7745c5c3_Err != nil {
@@ -3253,7 +3253,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 					var templ_7745c5c3_Var139 string
 					templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(n)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 699, Col: 9}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 703, Col: 9}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 					if templ_7745c5c3_Err != nil {
@@ -3279,7 +3279,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 			var templ_7745c5c3_Var140 string
 			templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(pn.Caption)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 705, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 709, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
 			if templ_7745c5c3_Err != nil {
@@ -3298,7 +3298,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 			var templ_7745c5c3_Var141 string
 			templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.JoinStringErrs(l.Character)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 708, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 712, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var141))
 			if templ_7745c5c3_Err != nil {
@@ -3311,7 +3311,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 			var templ_7745c5c3_Var142 string
 			templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(l.Text)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 708, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 712, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
 			if templ_7745c5c3_Err != nil {
@@ -3330,7 +3330,7 @@ func panelCard(pn store.Panel, i int) templ.Component {
 			var templ_7745c5c3_Var143 string
 			templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinStringErrs(pn.SFX)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 711, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 715, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var143))
 			if templ_7745c5c3_Err != nil {
@@ -3559,7 +3559,7 @@ func bookToolbar(v PagesView) templ.Component {
 		var templ_7745c5c3_Var151 string
 		templ_7745c5c3_Var151, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 755, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 759, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var151))
 		if templ_7745c5c3_Err != nil {
@@ -3730,7 +3730,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 		var templ_7745c5c3_Var157 string
 		templ_7745c5c3_Var157, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("leaf-%d", p.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 789, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 793, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var157)
 		if templ_7745c5c3_Err != nil {
@@ -3749,7 +3749,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var158 string
 			templ_7745c5c3_Var158, templ_7745c5c3_Err = templ.ResolveAttributeValue("art-" + p.Image)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 793, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 797, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var158)
 			if templ_7745c5c3_Err != nil {
@@ -3762,7 +3762,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var159 string
 			templ_7745c5c3_Var159, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%s/book/view?img=%d", base(st), idx))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 793, Col: 133}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 797, Col: 133}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var159)
 			if templ_7745c5c3_Err != nil {
@@ -3775,7 +3775,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var160 string
 			templ_7745c5c3_Var160, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Open page %d", p.Number))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 793, Col: 210}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 797, Col: 210}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var160)
 			if templ_7745c5c3_Err != nil {
@@ -3788,7 +3788,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var161 string
 			templ_7745c5c3_Var161, templ_7745c5c3_Err = templ.ResolveAttributeValue("/media/t/" + p.Image)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 794, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 798, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var161)
 			if templ_7745c5c3_Err != nil {
@@ -3801,7 +3801,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var162 string
 			templ_7745c5c3_Var162, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Page %d: %s", p.Number, p.Title))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 794, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 798, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var162)
 			if templ_7745c5c3_Err != nil {
@@ -3840,7 +3840,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 			var templ_7745c5c3_Var163 string
 			templ_7745c5c3_Var163, templ_7745c5c3_Err = templ.JoinStringErrs(p.ImageError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 808, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 812, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var163))
 			if templ_7745c5c3_Err != nil {
@@ -3863,7 +3863,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 		var templ_7745c5c3_Var164 string
 		templ_7745c5c3_Var164, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(p.Number))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 818, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 822, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var164))
 		if templ_7745c5c3_Err != nil {
@@ -3876,7 +3876,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 		var templ_7745c5c3_Var165 string
 		templ_7745c5c3_Var165, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 819, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 823, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var165)
 		if templ_7745c5c3_Err != nil {
@@ -3889,7 +3889,7 @@ func leaf(st *store.Story, p *store.Page, idx int, busy bool, sound PageSound, s
 		var templ_7745c5c3_Var166 string
 		templ_7745c5c3_Var166, templ_7745c5c3_Err = templ.JoinStringErrs(p.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 819, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 823, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var166))
 		if templ_7745c5c3_Err != nil {
@@ -4038,7 +4038,7 @@ func cancelButton(label string) templ.Component {
 			var templ_7745c5c3_Var171 string
 			templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 849, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 853, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var171))
 			if templ_7745c5c3_Err != nil {
@@ -4120,7 +4120,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var174 string
 			templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("ref-%d", r.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 864, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 868, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
 			if templ_7745c5c3_Err != nil {
@@ -4133,7 +4133,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var175 templ.SafeURL
 			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinURLErrs("/media/" + r.Image)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 865, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 869, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var175))
 			if templ_7745c5c3_Err != nil {
@@ -4146,7 +4146,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var176 string
 			templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.ResolveAttributeValue("/media/t/" + r.Image)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 866, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 870, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var176)
 			if templ_7745c5c3_Err != nil {
@@ -4159,7 +4159,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var177 string
 			templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.ResolveAttributeValue(r.Filename)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 866, Col: 73}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 870, Col: 73}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var177)
 			if templ_7745c5c3_Err != nil {
@@ -4172,7 +4172,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var178 string
 			templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.ResolveAttributeValue(r.Note)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 866, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 870, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 			if templ_7745c5c3_Err != nil {
@@ -4190,7 +4190,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 				var templ_7745c5c3_Var179 string
 				templ_7745c5c3_Var179, templ_7745c5c3_Err = templ.ResolveAttributeValue(r.Note)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 869, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 873, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var179)
 				if templ_7745c5c3_Err != nil {
@@ -4203,7 +4203,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 				var templ_7745c5c3_Var180 string
 				templ_7745c5c3_Var180, templ_7745c5c3_Err = templ.JoinStringErrs(r.Note)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 869, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 873, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var180))
 				if templ_7745c5c3_Err != nil {
@@ -4221,7 +4221,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var181 string
 			templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.ResolveAttributeValue("Remove " + r.Filename)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 871, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 875, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var181)
 			if templ_7745c5c3_Err != nil {
@@ -4234,7 +4234,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var182 string
 			templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%s/refs/%d/delete", base(st), r.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 871, Col: 142}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 875, Col: 142}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var182)
 			if templ_7745c5c3_Err != nil {
@@ -4247,7 +4247,7 @@ func refStripTarget(st *store.Story, refs []*store.Ref, busy bool, target string
 			var templ_7745c5c3_Var183 string
 			templ_7745c5c3_Var183, templ_7745c5c3_Err = templ.ResolveAttributeValue(target)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 871, Col: 163}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/story.templ`, Line: 875, Col: 163}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var183)
 			if templ_7745c5c3_Err != nil {

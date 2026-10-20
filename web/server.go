@@ -70,6 +70,15 @@ func Router(d Deps) http.Handler {
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/app/", cacheAssets(http.StripPrefix("/static/app/", http.FileServer(http.FS(static)))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// The installable app: its manifest, the service worker (served from the
+	// root so it may control every page) and the icons browsers and home
+	// screens ask for at fixed paths.
+	mux.HandleFunc("GET /manifest.webmanifest", staticFile("static/manifest.webmanifest", "application/manifest+json", "public, max-age=3600"))
+	mux.HandleFunc("GET /sw.js", staticFile("static/sw.js", "text/javascript; charset=utf-8", "no-cache"))
+	mux.HandleFunc("GET /favicon.ico", staticFile("static/icons/favicon.ico", "image/x-icon", "public, max-age=86400"))
+	touch := staticFile("static/icons/apple-touch-icon.png", "image/png", "public, max-age=86400")
+	mux.HandleFunc("GET /apple-touch-icon.png", touch)
+	mux.HandleFunc("GET /apple-touch-icon-precomposed.png", touch)
 
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /login", s.loginPage)
@@ -158,6 +167,20 @@ func Router(d Deps) http.Handler {
 	return theme.Middleware(s.withUser(mux))
 }
 
+// staticFile serves one embedded file at a fixed path with its own type and
+// cache policy.
+func staticFile(name, contentType, cache string) http.HandlerFunc {
+	data, err := staticFS.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", cache)
+		_, _ = w.Write(data)
+	}
+}
+
 // ---------- auth plumbing ----------
 
 type ctxKey struct{}
@@ -240,7 +263,7 @@ func (s *server) shell(r *http.Request, title string) views.ShellProps {
 	return views.ShellProps{
 		Title: title, User: userFrom(r.Context()), Fake: s.fake, Path: r.URL.Path,
 		CSS:     []string{versioned(assets.CSSPath), versioned("/static/app/app.css")},
-		Scripts: []string{versioned(assets.HTMXPath), versioned(assets.DSJSPath), versioned("/static/app/voice.js")},
+		Scripts: []string{versioned(assets.HTMXPath), versioned(assets.DSJSPath), versioned("/static/app/voice.js"), versioned("/static/app/pwa.js")},
 		Favicon: versioned("/static/app/favicon.svg"),
 	}
 }

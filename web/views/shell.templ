@@ -1,9 +1,12 @@
 package views
 
 import (
+	"strings"
+
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 	"github.com/lrgalego/htmx-ds/motion"
+	"github.com/lrgalego/htmx-ds/theme"
 
 	"github.com/lrgalego/pictura/internal/store"
 )
@@ -38,18 +41,102 @@ templ head(p ShellProps) {
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 	<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet"/>
 	<link rel="icon" href={ p.Favicon } type="image/svg+xml"/>
+	<link rel="icon" href="/static/app/icons/favicon-32.png" sizes="32x32" type="image/png"/>
+	<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+	<link rel="manifest" href="/manifest.webmanifest"/>
 	<meta name="htmx-config" content="{&quot;timeout&quot;:300000}"/>
-	<meta name="theme-color" content="#221b3a"/>
+	<meta name="application-name" content="Pictura"/>
+	<meta name="apple-mobile-web-app-title" content="Pictura"/>
+	<meta name="mobile-web-app-capable" content="yes"/>
+	<meta name="apple-mobile-web-app-capable" content="yes"/>
+	<meta name="format-detection" content="telephone=no"/>
+	// The browser and status bars take the page's own background. On iOS a
+	// dark page runs under a translucent status bar (the top bar pads for
+	// it); a light one keeps the default bar, whose text stays dark.
+	if theme.IsDark(ctx) {
+		<meta name="theme-color" content="#17132b"/>
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+	} else {
+		<meta name="theme-color" content="#fff9ef"/>
+		<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+	}
 }
 
 templ body(p ShellProps, content templ.Component) {
-	<div class="site">
+	<div class={ "site", templ.KV("site--tabs", hasTabs(p)), templ.KV("site--immersive", immersive(p)) }>
 		@Topbar(p)
 		<main class="site__main" data-motion-page>
 			@content
 		</main>
 		@footer()
+		if hasTabs(p) {
+			@Tabbar(p)
+		}
 	</div>
+}
+
+// immersive pages (the reader) take the whole phone screen: no bars.
+func immersive(p ShellProps) bool { return strings.HasSuffix(p.Path, "/read") }
+
+// hasTabs: a signed-in, enabled writer gets the app's tab bar on phones.
+func hasTabs(p ShellProps) bool { return p.User != nil && p.User.Enabled && !immersive(p) }
+
+// tabCurrent says which tab the page belongs to.
+func tabCurrent(p ShellProps, tab string) bool {
+	switch tab {
+	case "new":
+		return p.Path == "/stories/new"
+	case "stories":
+		return p.Path == "/stories" || (strings.HasPrefix(p.Path, "/stories/") && p.Path != "/stories/new")
+	case "cast":
+		return strings.HasPrefix(p.Path, "/cast")
+	case "you":
+		return strings.HasPrefix(p.Path, "/admin")
+	}
+	return false
+}
+
+func tabAttrs(current bool) templ.Attributes {
+	if current {
+		return templ.Attributes{"aria-current": "page"}
+	}
+	return nil
+}
+
+// Tabbar is the phone's bottom navigation, the way an app moves between
+// its sections. "You" opens the account menu (a bottom sheet on phones).
+templ Tabbar(p ShellProps) {
+	<nav class="tabbar" aria-label="App">
+		<a href="/stories" class="tabbar__tab" { tabAttrs(tabCurrent(p, "stories"))... }>
+			<span class="tabbar__icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"></path><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"></path></svg>
+			</span>
+			<span class="tabbar__label">Stories</span>
+		</a>
+		<a href="/stories/new" class="tabbar__tab tabbar__tab--new" { tabAttrs(tabCurrent(p, "new"))... }>
+			<span class="tabbar__icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+			</span>
+			<span class="tabbar__label">New</span>
+		</a>
+		<a href="/cast" class="tabbar__tab" { tabAttrs(tabCurrent(p, "cast"))... }>
+			<span class="tabbar__icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+			</span>
+			<span class="tabbar__label">Cast</span>
+		</a>
+		@components.DropdownTrigger("user-menu", "tabbar__tab", templ.Attributes{"aria-label": "Account", "aria-current": tabCurrentValue(p, "you")}) {
+			<span class="tabbar__icon tabbar__icon--avatar">{ initials(p.User.DisplayName) }</span>
+			<span class="tabbar__label">You</span>
+		}
+	</nav>
+}
+
+func tabCurrentValue(p ShellProps, tab string) string {
+	if tabCurrent(p, tab) {
+		return "page"
+	}
+	return "false"
 }
 
 // Logo is the brand mark: a yellow page with a tangerine speech dot.
@@ -81,13 +168,13 @@ templ Topbar(p ShellProps) {
 						@components.LinkButton(components.LinkButtonProps{Href: "/cast", Variant: components.ButtonGhost, Class: "topbar__hide-sm"}) {
 							Your cast
 						}
-						@components.LinkButton(components.LinkButtonProps{Href: "/stories/new"}) {
+						@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Class: "topbar__hide-app"}) {
 							@components.IconPlus()
 							<span class="topbar__hide-sm">New story</span>
 						}
 					}
 					@components.ThemeToggle(components.ThemeToggleProps{})
-					@components.DropdownTrigger("user-menu", "btn btn--ghost btn--icon", templ.Attributes{"aria-label": "Account menu"}) {
+					@components.DropdownTrigger("user-menu", "btn btn--ghost btn--icon topbar__hide-app", templ.Attributes{"aria-label": "Account menu"}) {
 						@components.Avatar(components.AvatarProps{Fallback: initials(p.User.DisplayName), Alt: p.User.DisplayName, Size: "sm"})
 					}
 					@components.DropdownContent(components.DropdownProps{ID: "user-menu", Align: "end"}) {
@@ -96,15 +183,15 @@ templ Topbar(p ShellProps) {
 						}
 						@components.DropdownSeparator()
 						if p.User.Enabled {
-							@components.DropdownLink("/stories", nil) {
+							@components.DropdownLink("/stories", templ.Attributes{"class": "menu__hide-app"}) {
 								@components.IconFolderOpen()
 								Your stories
 							}
-							@components.DropdownLink("/cast", nil) {
+							@components.DropdownLink("/cast", templ.Attributes{"class": "menu__hide-app"}) {
 								@components.IconUser()
 								Your cast
 							}
-							@components.DropdownLink("/stories/new", nil) {
+							@components.DropdownLink("/stories/new", templ.Attributes{"class": "menu__hide-app"}) {
 								@components.IconPlus()
 								New story
 							}
@@ -114,7 +201,7 @@ templ Topbar(p ShellProps) {
 									Admin
 								}
 							}
-							@components.DropdownSeparator()
+							<div class={ "dropdown__separator", templ.KV("menu__hide-app", !p.User.Admin) } role="separator"></div>
 						}
 						@components.DropdownItem(templ.Attributes{"hx-post": "/logout", "hx-swap": "none"}) {
 							@components.IconLogOut()

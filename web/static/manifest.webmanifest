@@ -1,0 +1,23 @@
+{
+  "name": "Pictura",
+  "short_name": "Pictura",
+  "description": "Turn a script into a comic book, and have it read to you.",
+  "id": "/",
+  "start_url": "/stories",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff9ef",
+  "theme_color": "#fff9ef",
+  "categories": ["books", "entertainment", "kids"],
+  "icons": [
+    { "src": "/static/app/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/app/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/app/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/app/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "New story", "url": "/stories/new", "icons": [{ "src": "/static/app/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Your cast", "url": "/cast", "icons": [{ "src": "/static/app/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

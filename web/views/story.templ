@@ -32,7 +32,7 @@ templ Library(cards []StoryCard) {
 				<h1>Your stories</h1>
 				<p>Every script you've turned into a comic, and the ones still in the works.</p>
 			</div>
-			@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg}) {
+			@components.LinkButton(components.LinkButtonProps{Href: "/stories/new", Size: components.SizeLg, Class: "page-head__new"}) {
 				@components.IconPlus()
 				New story
 			}
@@ -231,7 +231,11 @@ templ DeleteDialog(st *store.Story) {
 templ StoryShell(st *store.Story, step int, content templ.Component) {
 	<div class="wrap">
 		<div class="story-head">
-			<div>
+			<div class="story-head__text">
+				<a href="/stories" class="story-head__back">
+					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+					Stories
+				</a>
 				<h1>{ titleOr(st) }</h1>
 				if st.Logline != "" {
 					<p class="story-head__logline">{ st.Logline }</p>
@@ -246,13 +250,13 @@ templ StoryShell(st *store.Story, step int, content templ.Component) {
 				</div>
 			</div>
 			<div class="story-head__actions">
-				@components.LinkButton(components.LinkButtonProps{Href: base(st) + "/script", Variant: components.ButtonOutline, Size: components.SizeSm}) {
+				@components.LinkButton(components.LinkButtonProps{Href: base(st) + "/script", Variant: components.ButtonOutline, Size: components.SizeSm, Attrs: templ.Attributes{"aria-label": "Edit script"}}) {
 					@components.IconPencil()
-					Edit script
+					<span class="story-head__label">Edit script</span>
 				}
-				@components.DialogTrigger(components.DialogTriggerProps{URL: base(st) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm}}) {
+				@components.DialogTrigger(components.DialogTriggerProps{URL: base(st) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm, Attrs: templ.Attributes{"aria-label": "Delete story"}}}) {
 					@components.IconTrash()
-					Delete
+					<span class="story-head__label">Delete</span>
 				}
 			</div>
 		</div>
