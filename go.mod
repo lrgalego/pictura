@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.46.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.111.0
-	github.com/lrgalego/htmx-ds v0.10.0
+	github.com/lrgalego/htmx-ds v0.10.1
 	github.com/playwright-community/playwright-go v0.5700.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
