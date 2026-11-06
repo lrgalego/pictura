@@ -4,7 +4,7 @@
 # leaves Go to cross-compile via GOARCH. Without it, building a linux/amd64
 # image on an arm64 Mac emulates the entire builder stage under QEMU — minutes
 # instead of seconds.
-FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS build
 
 WORKDIR /src
 
@@ -51,7 +51,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 #   - CA certificates, or every outbound HTTPS call fails
 #   - /tmp, which modernc.org/sqlite uses for spills (large sorts, VACUUM)
 #   - a non-root uid with a passwd entry
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 
 COPY --from=build /out/server /usr/local/bin/
 

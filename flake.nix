@@ -2,7 +2,7 @@
   description = "pictura — dev environment";
 
   inputs = {
-    # unstable, because go.mod requires >= 1.26.1 and stable channels lag.
+    # unstable, because go.mod tracks the newest Go and stable channels lag.
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
   };
 
@@ -45,7 +45,7 @@
         default = pkgs.mkShell {
           packages =
             [
-              pkgs.go_1_26
+              pkgs.go_1_27
               (templShim pkgs)
               pkgs.hcloud
               pkgs.cloudflared
