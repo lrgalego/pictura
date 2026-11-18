@@ -26,7 +26,10 @@ type AI interface {
 	// ChatJSON runs one exchange; images ride along with the user turn.
 	ChatJSON(ctx context.Context, system, user string, images []Image, schemaName string, schema map[string]any, out any) error
 	GenerateImage(ctx context.Context, prompt, size string) ([]byte, error)
-	EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error)
+	// EditImage draws conditioned on reference images, each with the label
+	// that introduces it; a provider that takes no labels sends the images
+	// alone, in order, as the prompt numbers them.
+	EditImage(ctx context.Context, prompt string, refs []Image, size string) ([]byte, error)
 	// Segment finds every instance of a noun phrase in a PNG (SAM 3.1),
 	// returning boxes in the image's pixels.
 	Segment(ctx context.Context, png []byte, phrase string) ([]Region, error)
@@ -110,7 +113,7 @@ var characterSchema = obj(map[string]any{
 	"name":        str("The character's name as used in the script"),
 	"role":        str("Narrative role, e.g. protagonist, antagonist, sidekick, mentor"),
 	"age":         str("Apparent age, e.g. '9 years old', 'early thirties', 'ancient'"),
-	"visual":      str("Rich, concrete description of face, hair, body, skin, distinguishing marks and species — everything an illustrator needs to draw the character consistently"),
+	"visual":      str("Rich, concrete description of face, hair, body, skin, distinguishing marks and species — everything an illustrator needs to draw the character consistently. Always name the colors: hair color and style, skin tone, eye color (\"jet-black high ponytail\", \"warm brown skin\"), even for a black-and-white look — the page artist keeps a character the same from page to page by them"),
 	"wardrobe":    str("Their signature outfit(s), colors and materials"),
 	"items":       str("Props they carry or are associated with (weapons, tools, pets, vehicles); 'none' if nothing"),
 	"personality": str("Two sentences: temperament and how it shows in posture and expression"),
@@ -424,6 +427,27 @@ func RestylePrompt(story *store.Story, c *store.Character, refs int) string {
 	return lead + sheetBody(story, c)
 }
 
+// SheetRefs labels the images a sheet is drawn from: the current sheet
+// first when redrawing it in a new look (old), then the writer's
+// references with their notes.
+func SheetRefs(c *store.Character, old []byte, refs []Reference) []Image {
+	var out []Image
+	if old != nil {
+		out = append(out, Image{Label: fmt.Sprintf("Reference image 1: %s's current model sheet, in the old style. Keep the design, not the style.", c.Name), PNG: old})
+	}
+	for _, r := range refs {
+		label := fmt.Sprintf("Reference image %d: the writer's reference for %s", len(out)+1, c.Name)
+		if r.Filename != "" {
+			label += " (file: " + r.Filename + ")"
+		}
+		if r.Note != "" {
+			label += ": " + r.Note
+		}
+		out = append(out, Image{Label: label, PNG: r.PNG})
+	}
+	return out
+}
+
 func sheetBody(story *store.Story, c *store.Character) string {
 	style := StyleBySlug(story.Style).Direction
 	return fmt.Sprintf(`Character reference sheet (model sheet) for a comic, %s. Single character: %s (%s, %s).
@@ -439,6 +463,20 @@ Layout, on a plain white background with no text other than the character's name
 // Image composes from ten reference images, and a page rarely shows more
 // than eight characters.
 const MaxPageRefs = 8
+
+// PageRefs labels the sheets that ride along with a page, in cast order,
+// each with the character it is: a name right by its image is what keeps
+// that character on-model in every panel.
+func PageRefs(cast []*store.Character, sheets [][]byte) []Image {
+	out := make([]Image, 0, len(cast))
+	for i, c := range cast {
+		if i >= len(sheets) {
+			break
+		}
+		out = append(out, Image{Label: fmt.Sprintf("Reference image %d: the character sheet of %s. Every time %s appears, draw them exactly like this.", i+1, c.Name, c.Name), PNG: sheets[i]})
+	}
+	return out
+}
 
 // PageCast picks the characters whose sheets ride along with a page: the
 // ones it shows, those in the most panels and with the most lines first,
@@ -480,12 +518,15 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 	if page.Number == 1 {
 		fmt.Fprintf(&b, "This is the opening page: letter the story title %q once as a title header across the top, in a bold comic title font, above the first panel.\n", story.Title)
 	} else {
-		fmt.Fprintf(&b, "This is page %d, an interior page: no title, no header text, no page number — only the panels with their bubbles and captions.\n", page.Number)
+		// Saying which page it is gets the number lettered in a corner.
+		b.WriteString("This is an interior page, not the opening one: no title, no header text, no page number — only the panels with their bubbles and captions.\n")
 	}
+	sheet := map[string]int{}
 	if len(chars) > 0 {
 		b.WriteString("The attached reference images are the character sheets: draw each character exactly as on their sheet — same face, hair, proportions, outfit and colors.\n")
 		for i, c := range chars {
 			fmt.Fprintf(&b, "Reference image %d = %s (%s).\n", i+1, c.Name, c.Visual)
+			sheet[strings.ToLower(c.Name)] = i + 1
 		}
 	}
 	for _, p := range page.Panels {
@@ -504,7 +545,18 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 			for _, n := range p.Characters {
 				shown[strings.ToLower(n)] = true
 			}
-			fmt.Fprintf(&b, " Characters present, each drawn once: %s.", strings.Join(p.Characters, ", "))
+			present := make([]string, len(p.Characters))
+			for i, n := range p.Characters {
+				present[i] = n
+				if k := sheet[strings.ToLower(n)]; k > 0 {
+					present[i] = fmt.Sprintf("%s (reference image %d)", n, k)
+				}
+			}
+			if len(sheet) > 0 {
+				fmt.Fprintf(&b, " Characters present, each drawn once and exactly as on their sheet: %s.", strings.Join(present, ", "))
+			} else {
+				fmt.Fprintf(&b, " Characters present, each drawn once: %s.", strings.Join(present, ", "))
+			}
 		}
 		if p.Caption != "" {
 			fmt.Fprintf(&b, " Caption box: %q.", p.Caption)
@@ -520,12 +572,26 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 			fmt.Fprintf(&b, " Sound effect lettered into the art: %q.", p.SFX)
 		}
 	}
+	if len(sheet) > 0 {
+		b.WriteString("\n\n" + likeness)
+	}
+	b.WriteString("\n\n" + continuity)
 	b.WriteString("\n\nLetter every caption, speech bubble and sound effect legibly in a comic font with the exact text given, each exactly once and only in its own panel. Within a panel, place bubbles in the order listed, left to right and top to bottom, so they read in that order, each tail pointing at its speaker. No other text, no watermark, no page number.")
 	if strings.TrimSpace(feedback) != "" {
 		fmt.Fprintf(&b, "\n\nRevision notes from the writer, apply them: %s", feedback)
 	}
 	return b.String()
 }
+
+// likeness and continuity close every page prompt. Rendering story pages
+// with and without them (Nano Banana Pro, story 17) showed characters
+// drifting between panels and pages — a hairstyle or a skin tone guessed
+// anew — and moves that started from the wrong place (a fox outside
+// leaping from inside the house); with them, far less of both.
+const (
+	likeness   = "LIKENESS: each character's design is fixed by their sheet and never changes between panels or pages: the same hair style, length and color, the same face and marks, the same outfit and accessories. Do not restyle, recolor or simplify anyone; if a detail is unclear at a distance, follow the sheet, not the description. Colors named in a description identify the character; render them in the page's style, so in a black-and-white style as the matching ink and screentone values, never in color."
+	continuity = "CONTINUITY: these panels are consecutive moments of one story, not separate pictures. Before drawing, settle the geography of every place on the page: what is inside and what is outside, where the doors, windows and seats are, who sits or stands where and on which side. Keep it in every panel: a character or object stays where the previous panel left it unless a panel shows it moving, and every movement starts from where it was (someone outside does not leap out of a window; someone seated stays in the same seat). Keep left and right consistent between panels unless the camera visibly moves. When the place changes, make the change readable: show the new place clearly in its first panel."
+)
 
 // ---------- description helpers ----------
 

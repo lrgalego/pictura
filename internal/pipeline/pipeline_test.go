@@ -121,7 +121,7 @@ func TestPagePrompt(t *testing.T) {
 	if d := describePage(page); !strings.Contains(d, "(staging: two rowboats side by side") {
 		t.Fatalf("revisions see the staging: %s", d)
 	}
-	for _, want := range []string{"2 panels", `story title "The Lighthouse"`, "Reference image 1 = Mara", "PANEL 1 (wide shot): Setting: lighthouse stairs, storm light. Mara climbs.", "Characters present, each drawn once: Mara.", `Caption box: "Rain hammered."`, `Speech bubble from Mara: "Hello?"`, `Speech bubble from Deep Voice, who is off-panel`, `Sound effect lettered into the art: "CRASH!"`, "PANEL 2 (close-up shot): She listens.\n", "each exactly once", "in the order listed"} {
+	for _, want := range []string{"2 panels", `story title "The Lighthouse"`, "Reference image 1 = Mara", "PANEL 1 (wide shot): Setting: lighthouse stairs, storm light. Mara climbs.", "Characters present, each drawn once and exactly as on their sheet: Mara (reference image 1).", "LIKENESS:", "CONTINUITY:", `Caption box: "Rain hammered."`, `Speech bubble from Mara: "Hello?"`, `Speech bubble from Deep Voice, who is off-panel`, `Sound effect lettered into the art: "CRASH!"`, "PANEL 2 (close-up shot): She listens.\n", "each exactly once", "in the order listed"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("page prompt missing %q:\n%s", want, p)
 		}
@@ -131,8 +131,11 @@ func TestPagePrompt(t *testing.T) {
 	}
 	page.Number = 2
 	p = PagePrompt(story(), nil, page, "less rain")
-	if !strings.Contains(p, "This is page 2, an interior page: no title") || !strings.Contains(p, "Revision notes from the writer, apply them: less rain") {
+	if !strings.Contains(p, "This is an interior page, not the opening one: no title") || strings.Contains(p, "page 2") || !strings.Contains(p, "Revision notes from the writer, apply them: less rain") {
 		t.Fatalf("interior page prompt:\n%s", p)
+	}
+	if !strings.Contains(p, "Characters present, each drawn once: Mara.") || strings.Contains(p, "LIKENESS") || !strings.Contains(p, "CONTINUITY") {
+		t.Fatalf("without sheets, no reference numbers and no likeness rule:\n%s", p)
 	}
 	if strings.Contains(p, "attached reference images are the character sheets") {
 		t.Fatal("no sheet sentence without cast")
@@ -167,7 +170,7 @@ func (r *recorder) ChatJSON(ctx context.Context, system, user string, images []I
 func (r *recorder) GenerateImage(ctx context.Context, prompt, size string) ([]byte, error) {
 	return nil, nil
 }
-func (r *recorder) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (r *recorder) EditImage(ctx context.Context, prompt string, refs []Image, size string) ([]byte, error) {
 	return nil, nil
 }
 func (r *recorder) Segment(ctx context.Context, png []byte, phrase string) ([]Region, error) {
@@ -305,7 +308,7 @@ func (empty) ChatJSON(ctx context.Context, system, user string, images []Image, 
 func (empty) GenerateImage(ctx context.Context, prompt, size string) ([]byte, error) {
 	return nil, nil
 }
-func (empty) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (empty) EditImage(ctx context.Context, prompt string, refs []Image, size string) ([]byte, error) {
 	return nil, nil
 }
 func (empty) Segment(ctx context.Context, png []byte, phrase string) ([]Region, error) {
@@ -329,5 +332,21 @@ func TestTextStepsRejectEmptyAnswers(t *testing.T) {
 	}
 	if _, err := AdjustBreakdown(ctx, empty{}, st, nil, nil, "f"); err == nil || !strings.Contains(err.Error(), "no pages") {
 		t.Fatalf("adjust breakdown: %v", err)
+	}
+}
+
+func TestReferenceLabels(t *testing.T) {
+	ash, emmy := &store.Character{Name: "Ash"}, &store.Character{Name: "Emmy"}
+	refs := PageRefs([]*store.Character{ash, emmy}, [][]byte{{1}})
+	if len(refs) != 1 || refs[0].Label != "Reference image 1: the character sheet of Ash. Every time Ash appears, draw them exactly like this." {
+		t.Fatalf("page refs: %+v", refs)
+	}
+	sheet := SheetRefs(ash, []byte{9}, []Reference{{Filename: "a.png", Note: "the scarf", PNG: []byte{2}}, {PNG: []byte{3}}})
+	if len(sheet) != 3 || !strings.HasPrefix(sheet[0].Label, "Reference image 1: Ash's current model sheet") ||
+		sheet[1].Label != "Reference image 2: the writer's reference for Ash (file: a.png): the scarf" || sheet[2].Label != "Reference image 3: the writer's reference for Ash" {
+		t.Fatalf("sheet refs: %+v", sheet)
+	}
+	if got := SheetRefs(ash, nil, nil); len(got) != 0 {
+		t.Fatalf("nothing to refer to: %+v", got)
 	}
 }

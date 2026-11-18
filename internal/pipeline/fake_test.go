@@ -96,7 +96,7 @@ func TestFakeImagesAndDelay(t *testing.T) {
 	if err != nil || img.Bounds().Dx() != 768 {
 		t.Fatalf("sheet placeholder: %v %v", img.Bounds(), err)
 	}
-	page, err := f.EditImage(ctx, strings.Repeat("A finished comic page ", 10), [][]byte{sheet}, PageSize)
+	page, err := f.EditImage(ctx, strings.Repeat("A finished comic page ", 10), []Image{{PNG: sheet}}, PageSize)
 	if err != nil {
 		t.Fatal(err)
 	}

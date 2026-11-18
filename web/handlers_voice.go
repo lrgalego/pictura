@@ -8,6 +8,7 @@ import (
 	"github.com/lrgalego/htmx-ds/components"
 	"github.com/lrgalego/htmx-ds/layout"
 
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/web/views"
 )
@@ -125,7 +126,7 @@ func (s *server) voicePreview(w http.ResponseWriter, r *http.Request) {
 		}
 		text = pipeline.SampleLine(c, pages)
 	}
-	sp, err := s.samples.get(r, s.voice, v.ID, text)
+	sp, err := s.samples.get(r, s.speaker(st), v.ID, models.VoiceTag(st, v.ID), text)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -152,8 +153,10 @@ type sampleCache struct {
 
 const sampleCacheSize = 64
 
-func (c *sampleCache) get(r *http.Request, sp pipeline.Speaker, voice, text string) (*pipeline.Speech, error) {
-	key := voice + "\x00" + text
+// get speaks text in a voice; tag (models.VoiceTag) tells apart the same
+// voice read by different voice models.
+func (c *sampleCache) get(r *http.Request, sp pipeline.Speaker, voice, tag, text string) (*pipeline.Speech, error) {
+	key := tag + "\x00" + text
 	c.mu.Lock()
 	if got, ok := c.items[key]; ok {
 		c.mu.Unlock()

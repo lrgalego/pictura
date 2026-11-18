@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lrgalego/pictura/internal/elevenlabs"
+	"github.com/lrgalego/pictura/internal/gemini"
 	"github.com/lrgalego/pictura/internal/meta"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/internal/usage"
@@ -187,5 +188,58 @@ func TestReadNotice(t *testing.T) {
 	}
 	if got := readNotice([]*store.Page{{ID: 2, ReadingError: "elevenlabs: (quota_exceeded)"}}, nil); !strings.Contains(got, "out of credits") {
 		t.Fatalf("a page refused for credits: %q", got)
+	}
+}
+
+func TestAdminGemini(t *testing.T) {
+	e := newEnv(t)
+	e.signup("boss")
+	ctx := context.Background()
+	_ = e.st.SetUserAdmin(ctx, "boss", true)
+	// A storyboard planned by Gemini counts for the storyboard artist,
+	// next to the Meta calls; a refusal for credits shows on the card.
+	for _, c := range []usage.Call{
+		{Provider: usage.Meta, Kind: usage.Chat, Model: "muse-spark", Op: "pages", OK: true, InputTokens: 100},
+		{Provider: usage.Gemini, Kind: usage.Chat, Model: "gemini-4-hydrogen", Op: "pages", OK: true, InputTokens: 50},
+		{Provider: usage.Gemini, Kind: usage.Speech, Model: "gemini-3.8-flash-tts", OK: false, Error: "gemini gemini-3.8-flash-tts: the voice service is out of credits: Your prepayment credits are depleted."},
+	} {
+		if err := e.st.RecordCall(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body := e.get("/admin")
+	if !strings.Contains(body, "Muse Spark + Gemini") || !strings.Contains(body, "gemini-4-hydrogen, muse-spark") {
+		t.Error("the storyboard artist lists both services and models")
+	}
+	if !strings.Contains(body, "Gemini voice") {
+		t.Error("the narrator lists the Gemini voice")
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"name":"models/gemini-4-hydrogen"},{"name":"models/gemini-3-pro-image"}]}`)
+	}))
+	defer api.Close()
+	g := gemini.New("k")
+	g.BaseURL = api.URL
+	live := httptest.NewServer(Router(Deps{Store: e.st, Jobs: e.runner, Gemini: g}))
+	defer live.Close()
+	resp, err := e.client.Get(live.URL + "/admin/live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	page := string(b)
+	for _, want := range []string{"Gemini API", "A model is missing", "gemini-nano-banana-2.1", "Out of prepaid credits", "Last refused for credits"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("live card lacks %q", want)
+		}
+	}
+	// Once a call works again, the refusal is history.
+	_ = e.st.RecordCall(ctx, usage.Call{Provider: usage.Gemini, Kind: usage.Speech, Model: "gemini-3.8-flash-tts", OK: true, At: time.Now().Add(time.Second)})
+	resp, _ = e.client.Get(live.URL + "/admin/live")
+	b, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(b), "Out of prepaid credits") || !strings.Contains(string(b), "Worked since") {
+		t.Errorf("after a working call:\n%s", b)
 	}
 }

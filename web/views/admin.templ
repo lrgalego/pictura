@@ -97,10 +97,24 @@ type ElevenLive struct {
 	WorkedSince      time.Time // a line was voiced after that refusal
 }
 
+// GeminiLive is Gemini's answer to a check right now.
+type GeminiLive struct {
+	OK      bool
+	Error   string
+	Models  []string // the Gemini models on offer to stories
+	Missing []string // of those, the ones the key cannot use
+	// The latest refusal for want of prepaid credits, if any, and whether
+	// a call has worked since.
+	LastRefusal   string
+	LastRefusalAt time.Time
+	WorkedSince   time.Time
+}
+
 // AdminLive is the services panel, checked when the page loads.
 type AdminLive struct {
 	Fake   bool
 	Meta   *MetaLive
+	Gemini *GeminiLive
 	Eleven *ElevenLive
 }
 
@@ -560,6 +574,9 @@ templ AdminLivePanel(v AdminLive) {
 		if v.Meta != nil {
 			@metaCard(v.Meta)
 		}
+		if v.Gemini != nil {
+			@geminiCard(v.Gemini)
+		}
 		if v.Eleven != nil {
 			@elevenCard(v.Eleven)
 		}
@@ -633,6 +650,53 @@ templ metaCard(m *MetaLive) {
 				}
 				Meta's API has no plan or billing endpoint: the tokens under Agents are what Pictura counted.
 			</p>
+		}
+	}
+}
+
+templ geminiCard(g *GeminiLive) {
+	@components.Card("admin__service", nil) {
+		@components.CardHeader() {
+			@components.CardTitle() {
+				Gemini API
+			}
+			@components.CardDescription() {
+				Gemini 4, Nano Banana and Gemini TTS, for the stories that pick them.
+			}
+		}
+		@components.CardContent() {
+			<div class="admin__line">
+				if g.OK && len(g.Missing) == 0 {
+					@serviceBadge(true, "Answering")
+				} else if g.OK {
+					@serviceBadge(false, "A model is missing")
+				} else {
+					@serviceBadge(false, "Not answering")
+				}
+				if g.LastRefusal != "" && g.WorkedSince.IsZero() {
+					@serviceBadge(false, "Out of prepaid credits")
+				}
+			</div>
+			if g.Error != "" {
+				<code class="admin__code">{ g.Error }</code>
+			}
+			<dl class="admin__facts">
+				<dt>On offer</dt>
+				<dd><code>{ strings.Join(g.Models, ", ") }</code></dd>
+				if len(g.Missing) > 0 {
+					<dt>Not available to the key</dt>
+					<dd>{ strings.Join(g.Missing, ", ") }</dd>
+				}
+				if g.LastRefusal != "" {
+					<dt>Last refused for credits</dt>
+					<dd>{ ago(g.LastRefusalAt) }</dd>
+					if !g.WorkedSince.IsZero() {
+						<dt>Worked since</dt>
+						<dd>{ ago(g.WorkedSince) }</dd>
+					}
+				}
+			</dl>
+			<p class="note">The project runs on prepaid credits, which the API cannot report: a refusal is the first sign they ran out. Top them up in AI Studio. The tokens under Agents are what Pictura counted.</p>
 		}
 	}
 }

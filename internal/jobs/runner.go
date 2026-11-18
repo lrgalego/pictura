@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/internal/usage"
@@ -25,6 +26,11 @@ import (
 type Runner struct {
 	// Voice speaks the read-aloud lines; New sets the offline tones.
 	Voice pipeline.Speaker
+	// Models, when set, hands each story the models it picked per role;
+	// without it every role uses the runner's AI and Voice. Reading the
+	// lettering, finding the balloons and planning the sounds always use
+	// the runner's AI.
+	Models *models.Router
 
 	st           *store.Store
 	ai           pipeline.AI
@@ -51,6 +57,28 @@ func New(st *store.Store, ai pipeline.AI, images int) *Runner {
 		images = 1
 	}
 	return &Runner{Voice: pipeline.FakeVoice{}, st: st, ai: ai, queues: map[int64][]*task{}, storyRunning: map[int64]bool{}, charRunning: map[int64]bool{}, charCount: map[int64]int{}, pagesBusy: map[int64]int{}, imgSem: make(chan struct{}, images)}
+}
+
+// aiFor is the model client for a story's role.
+func (r *Runner) aiFor(story *store.Story, role string) pipeline.AI {
+	if r.Models == nil {
+		return r.ai
+	}
+	if ai := r.Models.AI(story, role); ai != nil {
+		return ai
+	}
+	return r.ai
+}
+
+// speaker is the voice a story picked.
+func (r *Runner) speaker(story *store.Story) pipeline.Speaker {
+	if r.Models == nil {
+		return r.Voice
+	}
+	if sp := r.Models.Speaker(story); sp != nil {
+		return sp
+	}
+	return r.Voice
 }
 
 // Wait blocks until every queued and running job has finished (tests, shutdown).
@@ -218,7 +246,7 @@ func (r *Runner) Analyze(storyID int64) error {
 		if err != nil {
 			return err
 		}
-		an, err := pipeline.Analyze(ctx, r.ai, story.Script)
+		an, err := pipeline.Analyze(ctx, r.aiFor(story, models.Script), story.Script)
 		if err != nil {
 			return err
 		}
@@ -257,7 +285,7 @@ func (r *Runner) CastVoices(storyID int64) error {
 		if err != nil {
 			return err
 		}
-		narrator, voices, err := pipeline.CastVoices(ctx, r.ai, story, chars)
+		narrator, voices, err := pipeline.CastVoices(ctx, r.aiFor(story, models.Script), story, chars)
 		if err != nil {
 			return err
 		}
@@ -286,7 +314,7 @@ func (r *Runner) castVoices(ctx context.Context, storyID int64) {
 	if err != nil {
 		return
 	}
-	narrator, voices, err := pipeline.CastVoices(ctx, r.ai, story, chars)
+	narrator, voices, err := pipeline.CastVoices(ctx, r.aiFor(story, models.Script), story, chars)
 	if err != nil {
 		log.Printf("cast voices story %d: %v", storyID, err)
 		return
@@ -406,14 +434,6 @@ func (r *Runner) references(ctx context.Context, storyID, characterID int64) ([]
 	return refs, rows, nil
 }
 
-func refPNGs(refs []pipeline.Reference) [][]byte {
-	var out [][]byte
-	for _, r := range refs {
-		out = append(out, r.PNG)
-	}
-	return out
-}
-
 func lookChanged(c *store.Character, s pipeline.CharacterSpec) bool {
 	return c.Visual != s.Visual || c.Wardrobe != s.Wardrobe || c.Items != s.Items || c.Age != s.Age
 }
@@ -486,11 +506,11 @@ func (r *Runner) drawSheetAs(ctx context.Context, story *store.Story, c *store.C
 		if len(refs) > 5 {
 			refs = refs[:5]
 		}
-		png, err = r.ai.EditImage(ctx, pipeline.RestylePrompt(story, c, len(refs)), append([][]byte{old}, refPNGs(refs)...), pipeline.SheetSize)
+		png, err = r.aiFor(story, models.Sheets).EditImage(ctx, pipeline.RestylePrompt(story, c, len(refs)), pipeline.SheetRefs(c, old, refs), pipeline.SheetSize)
 	} else if len(refs) > 0 {
-		png, err = r.ai.EditImage(ctx, pipeline.SheetPrompt(story, c, len(refs)), refPNGs(refs), pipeline.SheetSize)
+		png, err = r.aiFor(story, models.Sheets).EditImage(ctx, pipeline.SheetPrompt(story, c, len(refs)), pipeline.SheetRefs(c, nil, refs), pipeline.SheetSize)
 	} else {
-		png, err = r.ai.GenerateImage(ctx, pipeline.SheetPrompt(story, c, 0), pipeline.SheetSize)
+		png, err = r.aiFor(story, models.Sheets).GenerateImage(ctx, pipeline.SheetPrompt(story, c, 0), pipeline.SheetSize)
 	}
 	if err != nil {
 		_ = r.st.SetCharacterSheet(ctx, c.ID, c.SheetImage, store.ImageError, err.Error())
@@ -532,7 +552,7 @@ func (r *Runner) Revise(storyID, charID int64, feedback string, revise, draw boo
 			return err
 		}
 		if strings.TrimSpace(feedback) != "" || revise {
-			spec, err := pipeline.AdjustCharacter(ctx, r.ai, story, c, feedback, refs)
+			spec, err := pipeline.AdjustCharacter(ctx, r.aiFor(story, models.Script), story, c, feedback, refs)
 			if err != nil {
 				return err
 			}
@@ -576,7 +596,7 @@ func (r *Runner) adopt(ctx context.Context, storyID, charID int64) error {
 			return err
 		}
 		refs := []pipeline.Reference{{Filename: "character-sheet.png", Note: "the finished character sheet the writer supplied; it is authoritative", PNG: png}}
-		spec, err := pipeline.AdjustCharacter(ctx, r.ai, story, c,
+		spec, err := pipeline.AdjustCharacter(ctx, r.aiFor(story, models.Script), story, c,
 			"A finished character sheet was uploaded and will be used as-is for every page. Rewrite the visual, wardrobe and items fields to describe exactly what the sheet shows, in the same order of detail as before. Keep the name, role, age and personality unless the sheet clearly contradicts them.", refs)
 		if err != nil {
 			return err
@@ -668,7 +688,7 @@ func (r *Runner) AdjustCast(storyID int64, feedback string) error {
 		if err != nil {
 			return err
 		}
-		specs, err := pipeline.AdjustCharacters(ctx, r.ai, story, existing, feedback)
+		specs, err := pipeline.AdjustCharacters(ctx, r.aiFor(story, models.Script), story, existing, feedback)
 		if err != nil {
 			return err
 		}
@@ -740,7 +760,7 @@ func (r *Runner) Breakdown(storyID int64) error {
 		if err != nil {
 			return err
 		}
-		specs, err := pipeline.Breakdown(ctx, r.ai, story, chars)
+		specs, err := pipeline.Breakdown(ctx, r.aiFor(story, models.Storyboard), story, chars)
 		if err != nil {
 			return err
 		}
@@ -771,7 +791,7 @@ func (r *Runner) AdjustPages(storyID int64, feedback string) error {
 		if err != nil {
 			return err
 		}
-		specs, err := pipeline.AdjustBreakdown(ctx, r.ai, story, chars, pages, feedback)
+		specs, err := pipeline.AdjustBreakdown(ctx, r.aiFor(story, models.Storyboard), story, chars, pages, feedback)
 		if err != nil {
 			return err
 		}
@@ -827,7 +847,7 @@ func (r *Runner) AdjustPage(storyID, pageID int64, feedback string) error {
 		if err != nil || page.StoryID != storyID {
 			return store.ErrNotFound
 		}
-		spec, err := pipeline.AdjustPage(ctx, r.ai, story, chars, page, feedback)
+		spec, err := pipeline.AdjustPage(ctx, r.aiFor(story, models.Storyboard), story, chars, page, feedback)
 		if err != nil {
 			return err
 		}
@@ -960,7 +980,7 @@ func (r *Runner) drawPage(ctx context.Context, story *store.Story, chars []*stor
 	for _, c := range cast {
 		images = append(images, refs[strings.ToLower(c.Name)])
 	}
-	png, err := r.ai.EditImage(ctx, pipeline.PagePrompt(story, cast, p, feedback), images, pipeline.PageSize)
+	png, err := r.aiFor(story, models.Pages).EditImage(ctx, pipeline.PagePrompt(story, cast, p, feedback), pipeline.PageRefs(cast, images), pipeline.PageSize)
 	if err != nil {
 		_ = r.st.SetPageImage(ctx, p.ID, p.Image, store.ImageError, err.Error())
 		return err
@@ -1126,7 +1146,7 @@ func NarrationReady(story *store.Story, chars []*store.Character, p *store.Page,
 		if l.Error != "" {
 			continue // failed and settled: the page plays without it
 		}
-		if l.Audio == "" || (l.Sound == "" && l.Voice != VoiceFor(story, chars, l.Speaker).ID) {
+		if l.Audio == "" || (l.Sound == "" && l.Voice != models.VoiceTag(story, VoiceFor(story, chars, l.Speaker).ID)) {
 			return false
 		}
 	}
@@ -1211,14 +1231,14 @@ func (r *Runner) narratePage(ctx context.Context, story *store.Story, chars []*s
 				continue
 			}
 			l := l
-			work = func() error { return r.soundLine(ctx, story.ID, l) }
+			work = func() error { return r.soundLine(ctx, story, l) }
 		default:
 			voice := VoiceFor(story, chars, l.Speaker)
-			if l.Audio != "" && l.Voice == voice.ID {
+			if l.Audio != "" && l.Voice == models.VoiceTag(story, voice.ID) {
 				continue
 			}
 			l := l
-			work = func() error { return r.voiceLine(ctx, story.ID, l, voice.ID) }
+			work = func() error { return r.voiceLine(ctx, story, l, voice.ID) }
 		}
 		wg.Add(1)
 		id := l.ID
@@ -1352,19 +1372,20 @@ func joinWords(ws []store.LineWord) string {
 // voiceLine synthesizes one line and times each lettered word. Words the
 // speaker performs as a vocal go to the voice as an audio tag and share
 // its time.
-func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine, voice string) error {
+func (r *Runner) voiceLine(ctx context.Context, story *store.Story, l *store.PageLine, voice string) error {
 	lettered := make([]pipeline.LetterWord, len(l.Words))
 	for i, w := range l.Words {
 		lettered[i] = pipeline.LetterWord{Text: w.Text, Tag: w.Tag}
 	}
 	text, owners := pipeline.ScriptWith(l.Delivery, lettered)
-	sp, err := r.Voice.Speak(ctx, text, voice)
+	speaker := r.speaker(story)
+	sp, err := speaker.Speak(ctx, text, voice)
 	if tag, only := pipeline.OnlyVocal(lettered); err != nil && only {
 		// The voice model can return nothing for a line that is only an
 		// audio tag ("[snores]..."), retries included. Make the sound with
 		// the sound-effects model instead; the line counts as voiced.
 		secs := pipeline.VocalSeconds(len(l.Words))
-		fx, ferr := r.Voice.Sound(ctx, pipeline.VocalSound(tag), secs)
+		fx, ferr := speaker.Sound(ctx, pipeline.VocalSound(tag), secs)
 		if ferr != nil {
 			return fmt.Errorf("%w (and the sound-effect fallback: %v)", err, ferr)
 		}
@@ -1376,7 +1397,7 @@ func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine
 	if err != nil {
 		return err
 	}
-	name, err := r.st.SaveAudio(ctx, storyID, sp.Ext, sp.Audio)
+	name, err := r.st.SaveAudio(ctx, story.ID, sp.Ext, sp.Audio)
 	if err != nil {
 		return err
 	}
@@ -1385,25 +1406,48 @@ func (r *Runner) voiceLine(ctx context.Context, storyID int64, l *store.PageLine
 	for i := range words {
 		words[i].Start, words[i].End = times[i][0], times[i][1]
 	}
-	return r.st.SetLineAudio(ctx, l.ID, voice, name, words)
+	return r.st.SetLineAudio(ctx, l.ID, models.VoiceTag(story, voice), name, words)
 }
 
 // soundLine makes a line's sound effect; its words light up together for
-// as long as it plays.
-func (r *Runner) soundLine(ctx context.Context, storyID int64, l *store.PageLine) error {
-	sp, err := r.Voice.Sound(ctx, l.Sound, l.Seconds)
+// as long as it plays. Sound effects come from ElevenLabs; a story voiced
+// by another model, when ElevenLabs cannot make one (no key, no credits),
+// has the narrator call the effect out instead, the way a grown-up reading
+// aloud would.
+func (r *Runner) soundLine(ctx context.Context, story *store.Story, l *store.PageLine) error {
+	speaker := r.speaker(story)
+	sp, err := speaker.Sound(ctx, l.Sound, l.Seconds)
+	secs := l.Seconds
+	if err != nil && r.callsOutEffects(story) {
+		said := joinWords(l.Words)
+		called, cerr := speaker.Speak(ctx, "[like a dramatic comic-book sound effect] "+said, pipeline.NarratorVoice(story).ID)
+		if cerr != nil {
+			return fmt.Errorf("%w (and calling it out: %v)", err, cerr)
+		}
+		log.Printf("sound line %d: %v; the narrator calls it out instead", l.ID, err)
+		sp, err = called, nil
+		if n := len(called.Words); n > 0 {
+			secs = called.Words[n-1].End
+		}
+	}
 	if err != nil {
 		return err
 	}
-	name, err := r.st.SaveAudio(ctx, storyID, sp.Ext, sp.Audio)
+	name, err := r.st.SaveAudio(ctx, story.ID, sp.Ext, sp.Audio)
 	if err != nil {
 		return err
 	}
 	words := append([]store.LineWord(nil), l.Words...)
 	for i := range words {
-		words[i].Start, words[i].End = 0, l.Seconds
+		words[i].Start, words[i].End = 0, secs
 	}
 	return r.st.SetLineAudio(ctx, l.ID, effectVoice, name, words)
+}
+
+// callsOutEffects reports whether a story's voice is one that can call a
+// sound effect out when the sound-effects model cannot make it.
+func (r *Runner) callsOutEffects(story *store.Story) bool {
+	return r.Models != nil && r.Models.Fake == nil && r.Models.Pick(story, models.Voices).Provider == usage.Gemini
 }
 
 // ---------- one page, one line ----------
@@ -1500,9 +1544,9 @@ func (r *Runner) RetryLine(storyID, lineID int64) error {
 func (r *Runner) makeLine(ctx context.Context, story *store.Story, chars []*store.Character, l *store.PageLine) error {
 	var err error
 	if l.Sound != "" {
-		err = r.soundLine(ctx, story.ID, l)
+		err = r.soundLine(ctx, story, l)
 	} else {
-		err = r.voiceLine(ctx, story.ID, l, VoiceFor(story, chars, l.Speaker).ID)
+		err = r.voiceLine(ctx, story, l, VoiceFor(story, chars, l.Speaker).ID)
 	}
 	if err != nil {
 		_ = r.st.SetLineError(ctx, l.ID, err.Error())

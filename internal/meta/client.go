@@ -40,6 +40,11 @@ type Client struct {
 	// Record, when set, is told about every request and its token usage.
 	Record usage.Recorder
 
+	// seen is shared by the copies With makes: the limits are the key's.
+	seen *seenLimits
+}
+
+type seenLimits struct {
 	mu     sync.Mutex
 	limits Limits
 }
@@ -54,9 +59,9 @@ type Limits struct {
 
 // Limits returns the rate limits seen last.
 func (c *Client) Limits() Limits {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.limits
+	c.seen.mu.Lock()
+	defer c.seen.mu.Unlock()
+	return c.seen.limits
 }
 
 func (c *Client) noteLimits(h http.Header) {
@@ -64,13 +69,13 @@ func (c *Client) noteLimits(h http.Header) {
 		return
 	}
 	n := func(k string) int { v, _ := strconv.Atoi(h.Get(k)); return v }
-	c.mu.Lock()
-	c.limits = Limits{
+	c.seen.mu.Lock()
+	c.seen.limits = Limits{
 		Requests: n("x-ratelimit-limit-requests"), RequestsLeft: n("x-ratelimit-remaining-requests"),
 		Tokens: n("x-ratelimit-limit-tokens"), TokensLeft: n("x-ratelimit-remaining-tokens"),
 		At: time.Now(),
 	}
-	c.mu.Unlock()
+	c.seen.mu.Unlock()
 }
 
 // usageBlock is the token count an answer carries.
@@ -158,7 +163,21 @@ func New(apiKey string) *Client {
 		ImageModel:   DefaultImageModel,
 		SegmentModel: DefaultSegmentModel,
 		HTTP:         &http.Client{Timeout: 6 * time.Minute},
+		seen:         &seenLimits{},
 	}
+}
+
+// With returns a copy of the client using the given models; an empty one
+// keeps the client's.
+func (c *Client) With(text, image string) *Client {
+	cp := *c
+	if text != "" {
+		cp.TextModel = text
+	}
+	if image != "" {
+		cp.ImageModel = image
+	}
+	return &cp
 }
 
 type apiError struct {
@@ -332,14 +351,15 @@ func (c *Client) GenerateImage(ctx context.Context, prompt, size string) ([]byte
 }
 
 // EditImage renders a prompt conditioned on reference images (PNG bytes),
-// which is how character sheets keep a page on-model.
-func (c *Client) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+// which is how character sheets keep a page on-model. Muse Image takes the
+// images alone; their labels are not sent.
+func (c *Client) EditImage(ctx context.Context, prompt string, refs []pipeline.Image, size string) ([]byte, error) {
 	if len(refs) == 0 {
 		return c.GenerateImage(ctx, prompt, size)
 	}
 	req := imageRequest{Model: c.ImageModel, Prompt: prompt, N: 1, Size: size, ResponseFormat: "b64_json", OutputFormat: "png"}
 	for _, r := range refs {
-		req.Images = append(req.Images, imageRef{ImageURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(r)})
+		req.Images = append(req.Images, imageRef{ImageURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(r.PNG)})
 	}
 	return c.image(ctx, "/images/edits", req)
 }

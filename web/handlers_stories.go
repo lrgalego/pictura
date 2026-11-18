@@ -14,6 +14,7 @@ import (
 	"github.com/lrgalego/htmx-ds/layout"
 
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pdf"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
@@ -58,7 +59,7 @@ func (s *server) library(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) newStoryPage(w http.ResponseWriter, r *http.Request) {
-	render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(views.ScriptFormData{})))
+	render(w, r, views.Shell(s.shell(r, "New story"), views.ScriptForm(views.ScriptFormData{Pick: s.modelPick(nil, models.Script)})))
 }
 
 // uploads reads the "references" files of a multipart form. Size and count
@@ -153,7 +154,10 @@ func (s *server) saveRefs(r *http.Request, storyID, characterID int64, files []*
 
 func (s *server) createStory(w http.ResponseWriter, r *http.Request) {
 	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
-	f := views.ScriptFormData{Title: field(r, "title"), Script: text, ScriptHTML: clean}
+	f := views.ScriptFormData{Title: field(r, "title"), Script: text, ScriptHTML: clean, Pick: s.modelPick(nil, models.Script)}
+	if m := r.FormValue("model_" + models.Script); s.validModel(models.Script, m) {
+		f.Pick.Value = m
+	}
 	if len(strings.Fields(f.Script)) < 30 {
 		f.Error = "Paste at least a few paragraphs — around 30 words is the minimum for a story worth drawing."
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -162,6 +166,10 @@ func (s *server) createStory(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.st.CreateStory(r.Context(), userFrom(r.Context()).ID, f.Title, f.Script, f.ScriptHTML, pipeline.Styles[0].Slug)
 	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.pickFromForm(r, st, models.Script); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -186,7 +194,7 @@ func (s *server) scriptPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, ScriptHTML: editorHTML(st)}
+	f := views.ScriptFormData{Story: st, Title: st.Title, Script: st.Script, ScriptHTML: editorHTML(st), Pick: s.scriptPick(st)}
 	render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepScript, views.ScriptForm(f))))
 }
 
@@ -196,7 +204,7 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean, text := scriptInput(r.FormValue("script_html"), r.FormValue("script"))
-	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: text, ScriptHTML: clean}
+	f := views.ScriptFormData{Story: st, Title: field(r, "title"), Script: text, ScriptHTML: clean, Pick: s.scriptPick(st)}
 	status := http.StatusUnprocessableEntity
 	switch {
 	case len(strings.Fields(f.Script)) < 30:
@@ -217,6 +225,10 @@ func (s *server) updateScript(w http.ResponseWriter, r *http.Request) {
 		st.Step = min(st.Step, store.StepCharacters)
 	}
 	if err := s.st.UpdateStory(r.Context(), st); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.pickFromForm(r, st, models.Script); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -281,7 +293,7 @@ func (s *server) lookView(r *http.Request, st *store.Story) (views.LookView, err
 	if err != nil {
 		return views.LookView{}, err
 	}
-	v := views.LookView{Story: st, Style: st.Style, Started: jobs.SheetsStarted(chars)}
+	v := views.LookView{Story: st, Style: st.Style, Started: jobs.SheetsStarted(chars), Pick: s.modelPick(st, models.Sheets)}
 	for _, c := range chars {
 		if c.SheetImage != "" {
 			v.Sheets++
@@ -378,6 +390,7 @@ func (s *server) charactersView(r *http.Request, st *store.Story) (views.Charact
 		return views.CharactersView{}, err
 	}
 	return views.CharactersView{
+		Pick:  s.modelPick(st, models.Sheets),
 		Story: st, Characters: chars, Job: job, CharJobs: charJobs, Working: working, Refs: refs, PageCount: len(pages),
 		AllReady:    jobs.AllReady(chars),
 		Suggestions: suggestions(lib, chars, st.ID),
@@ -1086,7 +1099,8 @@ func (s *server) pagesView(r *http.Request, st *store.Story) (views.PagesView, e
 		return views.PagesView{}, err
 	}
 	chars, _ := s.st.Characters(r.Context(), st.ID)
-	v := views.PagesView{Story: st, Pages: pages, Characters: chars, Job: job, Studio: studioOn(r), Sound: map[int64]views.PageSound{}}
+	v := views.PagesView{Story: st, Pages: pages, Characters: chars, Job: job, Studio: studioOn(r), Sound: map[int64]views.PageSound{},
+		Plan: s.modelPick(st, models.Storyboard), Draw: s.modelPick(st, models.Pages), Voice: s.modelPick(st, models.Voices)}
 	lines, err := s.st.StoryLines(r.Context(), st.ID)
 	if err != nil {
 		return v, err

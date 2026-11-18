@@ -106,7 +106,7 @@ func jsonInto(s string, out any) error { return json.Unmarshal([]byte(s), out) }
 func (c *castRecorder) GenerateImage(context.Context, string, string) ([]byte, error) {
 	return nil, nil
 }
-func (c *castRecorder) EditImage(context.Context, string, [][]byte, string) ([]byte, error) {
+func (c *castRecorder) EditImage(context.Context, string, []Image, string) ([]byte, error) {
 	return nil, nil
 }
 func (c *castRecorder) Segment(context.Context, []byte, string) ([]Region, error) { return nil, nil }

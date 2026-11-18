@@ -20,7 +20,9 @@ import (
 	"github.com/lrgalego/pictura/internal/blob"
 	"github.com/lrgalego/pictura/internal/elevenlabs"
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/gemini"
 	"github.com/lrgalego/pictura/internal/meta"
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/internal/usage"
@@ -31,7 +33,7 @@ func main() {
 	host := flag.String("host", "127.0.0.1", "listen address (the container passes 0.0.0.0)")
 	port := flag.Int("port", 8080, "listen port")
 	dataDir := flag.String("data", "./data", "directory for the SQLite database and generated images")
-	envFile := flag.String("env-file", ".env", "optional KEY=VALUE file loaded into the environment (META_API_KEY, ELEVENLABS_API_KEY)")
+	envFile := flag.String("env-file", ".env", "optional KEY=VALUE file loaded into the environment (META_API_KEY, GEMINI_API_KEY, ELEVENLABS_API_KEY)")
 	fakeAI := flag.Bool("fake-ai", false, "use the offline fake model and voice providers even if API keys are set")
 	healthCheck := flag.Bool("health-check", false, "probe /healthz on 127.0.0.1 and exit; used by the container healthcheck")
 	enableUser := flag.String("enable-user", "", "enable this account and exit (signing up does not enable an account)")
@@ -107,11 +109,24 @@ func main() {
 	if eleven != nil {
 		eleven.Record = record
 	}
+	// Each story picks its models per role from what is configured here.
+	router := &models.Router{Meta: metaClient, Eleven: eleven}
+	var geminiClient *gemini.Client
+	if gkey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); gkey != "" && !*fakeAI {
+		geminiClient = gemini.New(gkey)
+		geminiClient.Record = record
+		router.Gemini = geminiClient
+		log.Printf("Gemini API: text=%s image=%s speech=%s on offer", geminiClient.TextModel, geminiClient.ImageModel, geminiClient.SpeechModel)
+	}
+	if key == "" || *fakeAI {
+		router = &models.Router{Fake: ai, FakeVoice: voice}
+	}
 	runner := jobs.New(st, ai, 3)
 	runner.Voice = voice
+	runner.Models = router
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", *host, *port),
-		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: voice, Meta: metaClient, Eleven: eleven}),
+		Handler:           web.Router(web.Deps{Store: st, Jobs: runner, Fake: key == "" || *fakeAI, Voice: voice, Models: router, Meta: metaClient, Gemini: geminiClient, Eleven: eleven}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("listening on %s", srv.Addr)

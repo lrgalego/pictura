@@ -277,3 +277,47 @@ func NarratorSample(st *store.Story, pages []*store.Page) string {
 	}
 	return "Once upon a time, a story began."
 }
+
+// geminiVoices gives every catalog voice the Gemini prebuilt voice closest
+// to it in gender, age and manner, so a story keeps its cast when it moves
+// from ElevenLabs to Gemini and back.
+var geminiVoices = map[string]string{
+	"JBFqnCBsd6RMkjVDRZzb": "Charon",        // George: warm storyteller
+	"cgSgspJ2msm6clMCkdW9": "Leda",          // Jessica: playful, bright
+	"FGY2WhTYpPnrIDTdsKH5": "Laomedeia",     // Laura: enthusiastic, quirky
+	"N2lVS1w4EtoT3dr4eOWO": "Algenib",       // Callum: husky trickster
+	"SOYHLrjzK2X1ezoPC6cr": "Fenrir",        // Harry: fierce warrior
+	"IKne3meq5aSn9XLyUdCD": "Orus",          // Charlie: deep, confident
+	"TX3LPaxmHKxFdv7VOQHJ": "Puck",          // Liam: energetic
+	"bIHbv24MWmeRgasZH58o": "Zubenelgenubi", // Will: relaxed optimist
+	"EXAVITQu4vr4xnSDxMaL": "Kore",          // Sarah: reassuring, confident
+	"hpp4J3VqNfWAUOO0d1Us": "Autonoe",       // Bella: bright, warm
+	"XrExE9yKIg1WjnnlVkGX": "Zephyr",        // Matilda: upbeat
+	"Xb7hH8MSUJpSbSDYk0k2": "Erinome",       // Alice: clear educator
+	"pFZP5JQG7iQjIQuC4Bku": "Despina",       // Lily: velvety actress
+	"SAz9YHcvj6GT2YYXdXww": "Achernar",      // River: calm, soft
+	"CwhRBWXzGAHq8TQ4Fs17": "Umbriel",       // Roger: laid-back
+	"cjVigY5qzO86Huf0OWal": "Algieba",       // Eric: smooth
+	"iP95p4xoKVk53GoZ742B": "Achird",        // Chris: friendly
+	"nPczCjzI2devNBz1zQrb": "Schedar",       // Brian: deep, comforting
+	"onwK4e9ZLuTAKqWW03F9": "Rasalgethi",    // Daniel: formal broadcaster
+	"pNInz6obpgDQGcFmaJgB": "Alnilam",       // Adam: dominant, firm
+	"pqHfZKP75CvOlQylNhV4": "Sadaltager",    // Bill: wise, mature
+}
+
+// GeminiVoice is the Gemini voice a catalog voice speaks with, and the
+// accent to ask for when it is not American. An id that is not in the
+// catalog is taken to be a Gemini voice name already.
+func GeminiVoice(id string) (name, accent string) {
+	v, ok := VoiceByID(id)
+	if !ok {
+		if id == "" {
+			return geminiVoices[DefaultNarrator], "British"
+		}
+		return id, ""
+	}
+	if v.Accent != "American" {
+		accent = v.Accent
+	}
+	return geminiVoices[id], accent
+}

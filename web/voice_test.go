@@ -154,7 +154,7 @@ func TestSampleCacheEvicts(t *testing.T) {
 	sp := &countingVoice{}
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
 	for i := 0; i < sampleCacheSize+5; i++ {
-		if _, err := c.get(r, sp, "v", strings.Repeat("x", i+1)); err != nil {
+		if _, err := c.get(r, sp, "v", "v", strings.Repeat("x", i+1)); err != nil {
 			t.Fatal(err)
 		}
 	}

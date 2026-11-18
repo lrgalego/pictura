@@ -7,12 +7,14 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/lrgalego/htmx-ds/layout"
 
 	"github.com/lrgalego/pictura/internal/elevenlabs"
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/internal/usage"
@@ -59,12 +61,15 @@ var agents = []agentInfo{
 	{usage.ElevenLabs, usage.Sound, "", "Sound effects", "Makes the sound effects"},
 }
 
-// agentKey is how a call finds its agent.
-func agentKey(provider, kind, op string) string {
-	if kind == usage.Segment || provider == usage.ElevenLabs {
+// agentKey is how a call finds its agent: by what it made and for whom,
+// whichever provider made it, as a story may pick Meta or Gemini for a
+// role. A segmentation counts for its role whatever it looked for, and
+// every voiced line for the narrator.
+func agentKey(kind, op string) string {
+	if kind == usage.Segment || kind == usage.Speech || kind == usage.Sound {
 		op = ""
 	}
-	return provider + "/" + kind + "/" + op
+	return kind + "/" + op
 }
 
 var adminWindows = []struct {
@@ -154,13 +159,14 @@ func agentRows(used []store.AgentUsage, states []store.AgentState, models map[st
 		return rows[key]
 	}
 	for _, a := range agents {
-		add(agentKey(a.provider, a.kind, a.op), views.AdminAgent{Name: a.name, Role: a.role, Service: serviceName(a.provider, a.kind), Model: models[a.provider+"/"+a.kind], Status: views.AgentIdle})
+		add(agentKey(a.kind, a.op), views.AdminAgent{Name: a.name, Role: a.role, Service: serviceName(a.provider, a.kind), Model: models[a.provider+"/"+a.kind], Status: views.AgentIdle})
 	}
 	other := func(provider, kind, op, model string) *views.AdminAgent {
-		return add(agentKey(provider, kind, op), views.AdminAgent{Name: op, Role: "Calls no agent above claims", Service: serviceName(provider, kind), Model: model, Status: views.AgentIdle})
+		return add(agentKey(kind, op), views.AdminAgent{Name: op, Role: "Calls no agent above claims", Service: serviceName(provider, kind), Model: model, Status: views.AgentIdle})
 	}
 	for _, u := range used {
 		a := other(u.Provider, u.Kind, u.Op, u.Model)
+		addService(a, u.Provider, u.Kind, u.Model)
 		a.Usage.Add(views.AdminUsage{Calls: u.Calls, Failures: u.Failures, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.ReasoningTokens, CachedTokens: u.CachedTokens, Chars: u.Chars, Seconds: u.Seconds, Credits: u.Credits, Busy: u.Busy, Images: imagesOf(u)})
 		if a.Model == "" {
 			a.Model = u.Model
@@ -168,6 +174,7 @@ func agentRows(used []store.AgentUsage, states []store.AgentState, models map[st
 	}
 	for _, st := range states {
 		a := other(st.Provider, st.Kind, st.Op, st.Model)
+		addService(a, st.Provider, st.Kind, st.Model)
 		if st.LastAt.After(a.LastAt) {
 			a.LastAt = st.LastAt
 			a.Status = views.AgentOK
@@ -192,6 +199,31 @@ func agentRows(used []store.AgentUsage, states []store.AgentState, models map[st
 	return out
 }
 
+// addService notes on an agent another service and model it was seen
+// using, when a story picked other than the default.
+func addService(a *views.AdminAgent, provider, kind, model string) {
+	if svc := serviceName(provider, kind); !containsItem(a.Service, svc) {
+		a.Service += " + " + svc
+	}
+	if model != "" && !containsItem(a.Model, model) {
+		if a.Model == "" {
+			a.Model = model
+		} else {
+			a.Model += ", " + model
+		}
+	}
+}
+
+// containsItem reports whether a " + " or ", " separated list holds s.
+func containsItem(list, s string) bool {
+	for _, part := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == '+' }) {
+		if strings.TrimSpace(part) == s {
+			return true
+		}
+	}
+	return false
+}
+
 func imagesOf(u store.AgentUsage) int {
 	if u.Kind == usage.Image {
 		return u.Calls - u.Failures
@@ -207,6 +239,12 @@ func serviceName(provider, kind string) string {
 		return "Muse Image"
 	case usage.Meta + "/" + usage.Segment:
 		return "SAM"
+	case usage.Gemini + "/" + usage.Chat:
+		return "Gemini"
+	case usage.Gemini + "/" + usage.Image:
+		return "Nano Banana"
+	case usage.Gemini + "/" + usage.Speech:
+		return "Gemini voice"
 	case usage.ElevenLabs + "/" + usage.Speech:
 		return "ElevenLabs voice"
 	case usage.ElevenLabs + "/" + usage.Sound:
@@ -228,6 +266,13 @@ func (s *server) adminLive(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer wg.Done()
 			v.Meta = s.checkMeta(ctx)
+		}()
+	}
+	if s.gemini != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v.Gemini = s.checkGemini(ctx)
 		}()
 	}
 	if s.eleven != nil {
@@ -256,6 +301,35 @@ func (s *server) checkMeta(ctx context.Context) *views.MetaLive {
 	}
 	m.Limits = s.meta.Limits()
 	return m
+}
+
+func (s *server) checkGemini(ctx context.Context) *views.GeminiLive {
+	g := &views.GeminiLive{}
+	for _, m := range models.Catalog {
+		if m.Provider == usage.Gemini {
+			g.Models = append(g.Models, m.ID)
+		}
+	}
+	ids, err := s.gemini.Check(ctx)
+	if err != nil {
+		g.Error = err.Error()
+	} else {
+		g.OK = true
+		for _, want := range g.Models {
+			if !slices.Contains(ids, want) {
+				g.Missing = append(g.Missing, want)
+			}
+		}
+	}
+	if msg, at, err := s.st.LastErrorLike(ctx, usage.Gemini, pipeline.ErrOutOfCredits.Error()); err == nil && msg != "" {
+		g.LastRefusal, g.LastRefusalAt = msg, at
+		for _, kind := range []string{usage.Chat, usage.Image, usage.Speech} {
+			if ok, err := s.st.LastOKAt(ctx, usage.Gemini, kind); err == nil && ok.After(at) && ok.After(g.WorkedSince) {
+				g.WorkedSince = ok
+			}
+		}
+	}
+	return g
 }
 
 // quotaRe reads the plan's quota out of ElevenLabs' refusal.

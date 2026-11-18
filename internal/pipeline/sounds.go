@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lrgalego/pictura/internal/store"
@@ -32,6 +33,12 @@ const (
 // checked against eleven_v3 and eleven_v4_turbo: it is acted, not read
 // aloud, even on its own ("[gulps]" came back silent and is not offered).
 var VocalTags = []string{"yawns", "laughs", "giggles", "sighs", "gasps", "growls", "snores", "screams", "cries"}
+
+// IsVocalTag reports whether an audio tag is a vocal the speaker performs
+// rather than a delivery ("whispers", "excited").
+func IsVocalTag(tag string) bool {
+	return slices.Contains(VocalTags, strings.ToLower(strings.TrimSpace(tag)))
+}
 
 // vocalSounds describes each vocal for the sound-effects model, the
 // fallback when the voice returns nothing for a line that is only a tag.

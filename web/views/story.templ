@@ -101,6 +101,7 @@ type ScriptFormData struct {
 	Script     string // plain text
 	ScriptHTML string // sanitized editor HTML
 	Error      string
+	Pick       ModelPick // who reads the script
 }
 
 func draftURL(f ScriptFormData) string {
@@ -138,6 +139,7 @@ templ ScriptForm(f ScriptFormData) {
 					@scriptCounter()
 				}
 			}
+			@ModelPicker(f.Pick)
 			<div class="form__actions">
 				@components.Button(components.ButtonProps{Type: "submit", Size: components.SizeLg}) {
 					if f.Story == nil {
@@ -166,6 +168,7 @@ type LookView struct {
 	Sheets  int    // characters with a drawn sheet, redrawn on a change
 	Pages   int    // drawn pages that would need redrawing
 	Error   string
+	Pick    ModelPick // who draws the sheets
 }
 
 templ LookStep(v LookView) {
@@ -191,6 +194,7 @@ templ LookStep(v LookView) {
 				}
 			</div>
 		</fieldset>
+		@ModelPicker(v.Pick)
 		if v.Sheets > 0 {
 			<p class="note">{ lookChangeNote(v) }</p>
 		} else {
@@ -426,6 +430,7 @@ type CharactersView struct {
 	AllReady    bool                          // every sheet is drawn: storyboarding may start
 	Suggestions map[int64][]store.LibraryEntry // per character without a sheet: same-named characters from other stories
 	Lineage     map[int64][]*store.Story       // per character: other stories it also appears in
+	Pick        ModelPick                      // who draws the sheets
 }
 
 templ CharactersStep(v CharactersView) {
@@ -467,6 +472,9 @@ templ castToolbar(v CharactersView, bottom bool) {
 			}
 		}
 		<span class="toolbar__spacer"></span>
+		if !bottom {
+			@ModelPicker(v.Pick)
+		}
 		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/characters/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Active()}}) {
 			@components.IconPencil()
 			Adjust the cast
@@ -563,6 +571,9 @@ type PagesView struct {
 	Job        *store.Job
 	Studio     bool                // the sound studio is on in this browser
 	Sound      map[int64]PageSound // per page: its read-aloud state
+	Plan       ModelPick           // who storyboards
+	Draw       ModelPick           // who draws the pages
+	Voice      ModelPick           // who reads aloud
 }
 
 templ PagesStep(v PagesView) {
@@ -600,6 +611,10 @@ templ pagesToolbar(v PagesView, bottom bool) {
 			<span class="note">{ plural(len(v.Pages), "page", "pages") + ", " + plural(panelCount(v.Pages), "panel", "panels") + ". Read the plan, ask for changes, then draw." }</span>
 		}
 		<span class="toolbar__spacer"></span>
+		if !bottom {
+			@ModelPicker(v.Plan)
+			@ModelPicker(v.Draw)
+		}
 		@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/pages/restart", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
 			@components.IconRefreshCw()
 			Start over
@@ -758,6 +773,8 @@ templ bookToolbar(v PagesView) {
 	<div class="toolbar">
 		<span class="note">{ fmt.Sprintf("%d of %d pages drawn.", readyCount(v.Pages), len(v.Pages)) }</span>
 		<span class="toolbar__spacer"></span>
+		@ModelPicker(v.Draw)
+		@ModelPicker(v.Voice)
 		if readyCount(v.Pages) > 0 {
 			@studioSwitch(v.Story, v.Studio)
 			@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/read", Class: "read-cta"}) {

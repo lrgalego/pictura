@@ -20,8 +20,10 @@ import (
 	"github.com/lrgalego/htmx-ds/theme"
 
 	"github.com/lrgalego/pictura/internal/elevenlabs"
+	"github.com/lrgalego/pictura/internal/gemini"
 	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/meta"
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 	"github.com/lrgalego/pictura/web/views"
@@ -36,8 +38,11 @@ type Deps struct {
 	Jobs  *jobs.Runner
 	Fake  bool             // the offline provider is in use; the UI says so
 	Voice pipeline.Speaker // text to speech; nil means the offline tones
+	// Models offers each story a pick of models per role; nil offers none.
+	Models *models.Router
 	// The live services, for the admin page's checks; nil when offline.
 	Meta   *meta.Client
+	Gemini *gemini.Client
 	Eleven *elevenlabs.Client
 }
 
@@ -46,14 +51,16 @@ type server struct {
 	jobs    *jobs.Runner
 	fake    bool
 	voice   pipeline.Speaker
+	router  *models.Router
 	meta    *meta.Client
+	gemini  *gemini.Client
 	eleven  *elevenlabs.Client
 	samples sampleCache
 }
 
 // Router wires the app.
 func Router(d Deps) http.Handler {
-	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake, voice: d.Voice, meta: d.Meta, eleven: d.Eleven}
+	s := &server{st: d.Store, jobs: d.Jobs, fake: d.Fake, voice: d.Voice, router: d.Models, meta: d.Meta, gemini: d.Gemini, eleven: d.Eleven}
 	if s.voice == nil {
 		s.voice = pipeline.FakeVoice{}
 	}
@@ -129,6 +136,7 @@ func Router(d Deps) http.Handler {
 	mux.Handle("GET /stories/{id}/narrator", auth(s.narratorVoicePanel))
 	mux.Handle("POST /stories/{id}/narrator", auth(s.narratorVoice))
 	mux.Handle("GET /stories/{id}/voices/{voice}/preview", auth(s.voicePreview))
+	mux.Handle("POST /stories/{id}/models", auth(s.setModel))
 	mux.Handle("POST /stories/{id}/voices/cast", auth(s.castVoices))
 
 	mux.Handle("GET /stories/{id}/pages", auth(s.pagesPage))

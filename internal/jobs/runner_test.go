@@ -52,7 +52,7 @@ func (f *flaky) GenerateImage(ctx context.Context, prompt, size string) ([]byte,
 	}
 	return f.AI.GenerateImage(ctx, prompt, size)
 }
-func (f *flaky) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (f *flaky) EditImage(ctx context.Context, prompt string, refs []pipeline.Image, size string) ([]byte, error) {
 	if f.failImage {
 		return nil, errors.New("image down")
 	}
@@ -179,7 +179,7 @@ type edits struct {
 	refs    []int
 }
 
-func (e *edits) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (e *edits) EditImage(ctx context.Context, prompt string, refs []pipeline.Image, size string) ([]byte, error) {
 	e.mu.Lock()
 	e.prompts, e.refs = append(e.prompts, prompt), append(e.refs, len(refs))
 	e.mu.Unlock()
@@ -571,9 +571,6 @@ func TestReferencesOnlyReadyOnes(t *testing.T) {
 	pr, rows, err := e.r.references(e.ctx, e.sto.ID, chars[0].ID)
 	if err != nil || len(pr) != 0 || len(rows) != 0 {
 		t.Fatal("no references yet")
-	}
-	if refPNGs(nil) != nil {
-		t.Fatal("refPNGs of nothing is nil")
 	}
 	// A ref whose file vanished is skipped, not fatal.
 	r, _ := e.st.InsertRef(e.ctx, e.sto.ID, chars[0].ID, "a.png", "", tinyPNG(), 1600)

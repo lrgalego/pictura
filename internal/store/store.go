@@ -179,6 +179,9 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 	if err := s.addColumn("stories", "script_html", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.addColumn("stories", "models", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.addColumn("stories", "narrator_voice", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -405,7 +408,10 @@ type Story struct {
 	// Only SetNarratorVoice writes it, so a job holding a stale copy of the
 	// story cannot undo the writer's pick.
 	NarratorVoice string
-	CreatedAt     time.Time
+	// Models is the model picked per role ("pages": "gemini-3-pro-image");
+	// a role not in it uses the default. Only SetStoryModel writes it.
+	Models    map[string]string
+	CreatedAt time.Time
 	UpdatedAt     time.Time
 }
 
@@ -428,16 +434,20 @@ func (s *Store) Story(ctx context.Context, id int64) (*Story, error) {
 
 type scanner interface{ Scan(dest ...any) error }
 
-const storyCols = `id, user_id, title, logline, script, script_html, style, world, step, narrator_voice, created_at, updated_at`
+const storyCols = `id, user_id, title, logline, script, script_html, style, world, step, narrator_voice, models, created_at, updated_at`
 
 func scanStory(row scanner) (*Story, error) {
 	var st Story
-	var c, u string
-	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &st.NarratorVoice, &c, &u); err != nil {
+	var models, c, u string
+	if err := row.Scan(&st.ID, &st.UserID, &st.Title, &st.Logline, &st.Script, &st.ScriptHTML, &st.Style, &st.World, &st.Step, &st.NarratorVoice, &models, &c, &u); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	st.Models = map[string]string{}
+	if models != "" {
+		_ = json.Unmarshal([]byte(models), &st.Models)
 	}
 	st.CreatedAt, st.UpdatedAt = parseTime(c), parseTime(u)
 	return &st, nil
@@ -484,6 +494,19 @@ func (s *Store) SetStyle(ctx context.Context, storyID int64, style string) error
 // SetNarratorVoice sets the voice captions are read in.
 func (s *Store) SetNarratorVoice(ctx context.Context, storyID int64, voice string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE stories SET narrator_voice = ?, updated_at = ? WHERE id = ?`, voice, now(), storyID)
+	return err
+}
+
+// SetStoryModel records the model a story picked for a role; an empty
+// model goes back to the default. Only this key of the map is written, so
+// a job holding a stale copy of the story cannot undo another pick.
+func (s *Store) SetStoryModel(ctx context.Context, storyID int64, role, model string) error {
+	var err error
+	if model == "" {
+		_, err = s.db.ExecContext(ctx, `UPDATE stories SET models = json_remove(COALESCE(NULLIF(models, ''), '{}'), '$.' || ?), updated_at = ? WHERE id = ?`, role, now(), storyID)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE stories SET models = json_set(COALESCE(NULLIF(models, ''), '{}'), '$.' || ?, ?), updated_at = ? WHERE id = ?`, role, model, now(), storyID)
+	}
 	return err
 }
 

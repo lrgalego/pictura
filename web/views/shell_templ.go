@@ -855,7 +855,7 @@ func footer() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<footer class=\"wrap footer\"><span>Pictura turns scripts into comics.</span> <span>Text by Muse Spark, art by Muse Image.</span></footer>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<footer class=\"wrap footer\"><span>Pictura turns scripts into comics.</span> <span>Written and drawn by Muse and Gemini; read aloud by ElevenLabs and Gemini.</span></footer>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

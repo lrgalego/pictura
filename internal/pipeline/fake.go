@@ -347,7 +347,7 @@ func (f *Fake) GenerateImage(ctx context.Context, prompt, size string) ([]byte, 
 	return draw(prompt, size, false), nil
 }
 
-func (f *Fake) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (f *Fake) EditImage(ctx context.Context, prompt string, refs []Image, size string) ([]byte, error) {
 	if err := f.sleep(ctx); err != nil {
 		return nil, err
 	}

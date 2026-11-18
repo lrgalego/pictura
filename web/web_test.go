@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lrgalego/pictura/internal/jobs"
+	"github.com/lrgalego/pictura/internal/models"
 	"github.com/lrgalego/pictura/internal/pipeline"
 	"github.com/lrgalego/pictura/internal/store"
 )
@@ -73,7 +74,7 @@ func (g *gated) GenerateImage(ctx context.Context, prompt, size string) ([]byte,
 	defer g.mu.RUnlock()
 	return g.Fake.GenerateImage(ctx, prompt, size)
 }
-func (g *gated) EditImage(ctx context.Context, prompt string, refs [][]byte, size string) ([]byte, error) {
+func (g *gated) EditImage(ctx context.Context, prompt string, refs []pipeline.Image, size string) ([]byte, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.Fake.EditImage(ctx, prompt, refs, size)
@@ -97,7 +98,9 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(func() { st.Close() })
 	ai := &gated{}
 	runner := jobs.New(st, ai, 2)
-	srv := httptest.NewServer(Router(Deps{Store: st, Jobs: runner, Fake: true}))
+	// Offline, every model is on offer and the fakes answer for all.
+	runner.Models = &models.Router{Fake: ai, FakeVoice: pipeline.FakeVoice{}}
+	srv := httptest.NewServer(Router(Deps{Store: st, Jobs: runner, Fake: true, Models: runner.Models}))
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}

@@ -161,7 +161,7 @@ func TestGenerateImage(t *testing.T) {
 func TestEditImageWithReferences(t *testing.T) {
 	s := metatest.New(t)
 	c := client(s)
-	refs := [][]byte{[]byte("one"), []byte("two")}
+	refs := []pipeline.Image{{PNG: []byte("one")}, {PNG: []byte("two")}}
 	png, err := c.EditImage(context.Background(), "same robot, red scarf", refs, pipeline.PageSize)
 	if err != nil || !strings.HasPrefix(string(png), "\x89PNG") {
 		t.Fatalf("edit: %v", err)
@@ -282,7 +282,7 @@ func TestRecordsUsageAndLimits(t *testing.T) {
 	if err := c.ChatJSON(ctx, "sys", "user", nil, "pages", map[string]any{}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.EditImage(ctx, "a page", [][]byte{{1}}, pipeline.PageSize); err != nil {
+	if _, err := c.EditImage(ctx, "a page", []pipeline.Image{{PNG: []byte{1}}}, pipeline.PageSize); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Segment(ctx, []byte{1}, "speech bubble"); err != nil {

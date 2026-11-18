@@ -29,3 +29,8 @@ R2_BUCKET=pictura-media
 # alignment, models, user. Without it the app falls back to placeholder
 # tones, so keep this line.
 ELEVENLABS_API_KEY=op://pictura/elevenlabs-api/credential
+
+# Gemini: a second provider every story can pick per role — Gemini 4 for the
+# script and the storyboard, Nano Banana for the art, Gemini TTS for the
+# voices. Without it only Meta and ElevenLabs are on offer.
+GEMINI_API_KEY=op://pictura/Gemini API/api-key

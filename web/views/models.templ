@@ -1,0 +1,53 @@
+package views
+
+import "github.com/lrgalego/htmx-ds/components"
+
+// ModelPick is the picker for the model one of a story's roles uses. A
+// zero ModelPick (nothing to choose between) renders nothing.
+type ModelPick struct {
+	Role    string // "pages"
+	Verb    string // "Pages drawn by"
+	Value   string // the model in use
+	Options []ModelOption
+	// Action saves a pick as soon as it is made; empty, the picker is a
+	// plain field (model_<role>) of the form around it.
+	Action string
+	Saved  bool // just saved: say so
+}
+
+// ModelOption is one model on offer.
+type ModelOption struct {
+	ID, Name, Note string
+}
+
+func (p ModelPick) selectOptions() []components.SelectOption {
+	out := make([]components.SelectOption, len(p.Options))
+	for i, o := range p.Options {
+		out[i] = components.SelectOption{Value: o.ID, Label: o.Name + " · " + o.Note}
+	}
+	return out
+}
+
+// ModelPicker is a div, not a form, so it can sit inside another form (the
+// look step is one): its select posts itself with the role alongside.
+templ ModelPicker(p ModelPick) {
+	if len(p.Options) > 1 {
+		<div class="model-pick" id={ "model-pick-" + p.Role }>
+			<label class="model-pick__label" for={ "model-" + p.Role }>
+				<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5l-1.9-5.6L4.5 9l5.6-1.4L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13z"></path></svg>
+				{ p.Verb }
+			</label>
+			if p.Action != "" {
+				@components.Select(components.SelectProps{ID: "model-" + p.Role, Name: "model", Value: p.Value, Options: p.selectOptions(), Class: "model-pick__select", Attrs: templ.Attributes{
+					"hx-post": p.Action, "hx-trigger": "change", "hx-vals": `{"role": "` + p.Role + `"}`,
+					"hx-target": "#model-pick-" + p.Role, "hx-swap": "outerHTML",
+				}})
+			} else {
+				@components.Select(components.SelectProps{ID: "model-" + p.Role, Name: "model_" + p.Role, Value: p.Value, Options: p.selectOptions(), Class: "model-pick__select"})
+			}
+			if p.Saved {
+				<span class="model-pick__saved" role="status">Saved</span>
+			}
+		</div>
+	}
+}

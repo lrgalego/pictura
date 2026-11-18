@@ -174,6 +174,9 @@ func jobFailure(j *store.Job) (title, hint string) {
 		title = "The last step failed"
 	}
 	if pipeline.OutOfCredits(j.Error) {
+		if strings.Contains(j.Error, "gemini") {
+			return "Gemini is out of credits", GeminiCreditsHint
+		}
 		return "The voice service is out of credits", OutOfCreditsHint
 	}
 	switch e := strings.ToLower(j.Error); {
@@ -181,7 +184,7 @@ func jobFailure(j *store.Job) (title, hint string) {
 		hint = "Pictura restarted while this was running. Nothing is lost; start it again."
 	case strings.Contains(e, "elevenlabs"), strings.Contains(e, "voice service"):
 		hint = "The voice service didn't answer properly — usually a hiccup on their side. Everything that worked is kept; trying again only makes what's missing."
-	case strings.Contains(e, "meta api"), strings.Contains(e, "fake ai"), strings.Contains(e, "deadline"), strings.Contains(e, "timeout"):
+	case strings.Contains(e, "meta api"), strings.Contains(e, "gemini"), strings.Contains(e, "fake ai"), strings.Contains(e, "deadline"), strings.Contains(e, "timeout"):
 		hint = "The writing and drawing models didn't answer properly. That's usually a hiccup on their side; try again in a moment."
 	default:
 		hint = "Something went wrong on our side. Try again; if it keeps failing, change the request a little."
@@ -192,6 +195,10 @@ func jobFailure(j *store.Job) (title, hint string) {
 // OutOfCreditsHint is what a writer is told when ElevenLabs refuses for
 // want of credits.
 const OutOfCreditsHint = "ElevenLabs, the voice service, has no credits left, so some lines have no voice yet. Everything already made is kept, and the book plays without the missing lines. Once credits are added, try again: only the silent lines are made."
+
+// GeminiCreditsHint is what a writer is told when Gemini refuses for want
+// of prepaid credits.
+const GeminiCreditsHint = "The Gemini project has used up its prepaid credits. Everything already made is kept. Top the credits up in AI Studio and try again, or pick a Meta or ElevenLabs model for this step."
 
 // retryAction starts a failed job again from the step that shows it. A
 // revision needs the notes again, so it reopens the adjust dialog.

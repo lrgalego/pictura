@@ -11,6 +11,7 @@ import (
 // Providers.
 const (
 	Meta       = "meta"
+	Gemini     = "gemini"
 	ElevenLabs = "elevenlabs"
 )
 
@@ -19,7 +20,7 @@ const (
 	Chat    = "chat"    // a text model answer (Muse Spark)
 	Image   = "image"   // a drawn image (Muse Image)
 	Segment = "segment" // finding things on an image (SAM)
-	Speech  = "speech"  // a voiced line (ElevenLabs)
+	Speech  = "speech"  // a voiced line (ElevenLabs, Gemini)
 	Sound   = "sound"   // a sound effect (ElevenLabs)
 )
 
@@ -37,7 +38,7 @@ type Call struct {
 	Job     string // the job kind that made it, if any
 	OK      bool
 	Error   string
-	// Meta reports tokens per answer.
+	// Meta and Gemini report tokens per answer.
 	InputTokens     int
 	OutputTokens    int
 	ReasoningTokens int // part of OutputTokens
