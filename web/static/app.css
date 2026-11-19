@@ -199,7 +199,7 @@ h1, h2, h3, .display {
 .section__title { font-size: clamp(1.8rem, 3.5vw, 2.4rem); font-weight: 800; margin: 0 0 0.5rem; }
 .section__lede { color: var(--muted-foreground); margin: 0 0 2rem; max-width: 40rem; }
 
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem 1.75rem; counter-reset: step; }
+.steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.5rem 1.25rem; counter-reset: step; }
 .step { padding: 1.25rem; counter-increment: step; position: relative; }
 .step::before {
   content: counter(step);
@@ -289,7 +289,7 @@ h1, h2, h3, .display {
 .story-head__look:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .story-head__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
-.stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin: 0.5rem 0 1.75rem; padding: 0; list-style: none; }
+.stepper { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem; margin: 0.5rem 0 1.75rem; padding: 0; list-style: none; }
 .stepper__item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border: 2.5px solid var(--border); border-radius: var(--radius-lg); text-decoration: none; color: var(--muted-foreground); background: var(--card); font-weight: 700; }
 .stepper__item[href]:hover { border-color: var(--ink); color: var(--foreground); }
 .stepper__item--done { color: var(--foreground); border-color: var(--border); }
@@ -298,7 +298,7 @@ h1, h2, h3, .display {
 .stepper__item--done .stepper__num { background: var(--success); color: var(--success-foreground); border-color: var(--success); }
 .stepper__item--current .stepper__num { background: #221b3a; color: var(--pop); border-color: #221b3a; }
 .stepper__label { font-size: var(--text-sm); }
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   /* Narrow screens: a track of numbered dots joined by a line, the
      current step a pill with its name. The steps before it are links. */
   .stepper { display: flex; align-items: center; gap: 0; margin: 0.25rem 0 1.5rem; }
@@ -320,6 +320,33 @@ h1, h2, h3, .display {
   .stepper__item--current { padding-right: 0.65rem; }
   .stepper__num { width: 1.65rem; height: 1.65rem; font-size: 0.85rem; }
   .stepper__label { font-size: var(--text-xs); }
+}
+
+/* ---------- world: places and props ---------- */
+.world-section { margin-bottom: 2rem; }
+.world-section__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1rem; margin-bottom: 0.9rem; }
+.world-section__head h2 { margin: 0; font-size: 1.5rem; }
+.world-section__head .note { margin: 0; max-width: 40rem; }
+.world-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: 1.5rem 1.25rem; }
+.world-card { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.world-card--working { outline: 3px solid var(--primary); outline-offset: 2px; }
+.world-card__art { position: relative; aspect-ratio: 3 / 2; background: var(--muted); border-bottom: 3px solid var(--ink); overflow: hidden; }
+.world-card__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.world-card__art .char__state--idle { display: flex; flex-direction: column; justify-content: center; }
+.world-card__body { padding: 0.9rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.55rem; flex: 1; }
+.world-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+.world-card__name { margin: 0; font-size: 1.2rem; line-height: 1.25; }
+.world-card__head .badge { flex: none; }
+.world-card__error { margin: 0; color: var(--destructive); }
+.world-card__layout { font-size: var(--text-sm); }
+.world-card__layout summary { cursor: pointer; font-weight: 700; color: var(--muted-foreground); }
+.world-card__layout p { margin: 0.35rem 0 0; line-height: 1.5; }
+.world-card__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: auto; padding-top: 0.35rem; }
+.world-card__actions > :last-child { margin-left: auto; }
+.world-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+@media (max-width: 640px) {
+  .world-grid { grid-template-columns: 1fr; gap: 1.1rem; }
+  .world-card__body .char__desc { font-size: 0.85rem; }
 }
 
 /* ---------- job bar ---------- */

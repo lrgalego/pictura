@@ -275,7 +275,7 @@ func TestFullWorkflow(t *testing.T) {
 	}
 	e.waitIdle()
 	_, body = e.get(charsURL)
-	if !strings.Contains(body, "/media/") || !strings.Contains(body, "Storyboard the pages") {
+	if !strings.Contains(body, "/media/") || !strings.Contains(body, "Design the world") {
 		t.Fatal("no character sheet rendered after drawing")
 	}
 	if strings.Contains(body, `hx-trigger="every 2s"`) {
@@ -302,10 +302,29 @@ func TestFullWorkflow(t *testing.T) {
 		t.Fatal("feedback was not applied to the cast")
 	}
 
-	// Approve the cast: the breakdown job starts and we land on the pages.
+	// Approve the cast: the designer finds the places and props and we
+	// land on the world.
 	resp, _ = e.post(storyBase+"/characters/approve", nil, true)
-	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("HX-Redirect") != storyBase+"/pages" {
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("HX-Redirect") != storyBase+"/world" {
 		t.Fatalf("approve cast: %d %s", resp.StatusCode, resp.Header.Get("HX-Redirect"))
+	}
+	e.waitIdle()
+	resp, body = e.get(storyBase + "/world")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "the harbour at dusk") || !strings.Contains(body, "the brass lantern") || !strings.Contains(body, "Draw the concept art") {
+		t.Fatalf("world: %d\n%s", resp.StatusCode, body)
+	}
+	// Storyboarding waits for the concept art.
+	if _, body = e.post(storyBase+"/world/approve", nil, true); !strings.Contains(body, "Draw the concept art first") {
+		t.Fatal("storyboarding before the concept art is drawn")
+	}
+	e.post(storyBase+"/world/draw", nil, true)
+	e.waitIdle()
+	if _, body = e.get(storyBase + "/world"); !strings.Contains(body, "Art ready") || !strings.Contains(body, "Storyboard the pages") {
+		t.Fatal("no concept art after drawing")
+	}
+	resp, _ = e.post(storyBase+"/world/approve", nil, true)
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("HX-Redirect") != storyBase+"/pages" {
+		t.Fatalf("approve world: %d %s", resp.StatusCode, resp.Header.Get("HX-Redirect"))
 	}
 	e.waitIdle()
 	resp, body = e.get(storyBase + "/pages")
@@ -338,7 +357,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// The library shows the story with a cover.
 	_, body = e.get("/stories")
-	if !strings.Contains(body, "Step 5 of 5") || !strings.Contains(body, "/media/") {
+	if !strings.Contains(body, "Step 6 of 6") || !strings.Contains(body, "/media/") {
 		t.Fatal("library should show the finished story with a cover")
 	}
 
@@ -509,7 +528,7 @@ func TestReferenceImages(t *testing.T) {
 	}
 	e.waitIdle()
 	_, body = e.get(storyBase + "/characters")
-	if strings.Count(body, `class="tile__avatar" src=`) != 3 || !strings.Contains(body, "Storyboard the pages") {
+	if strings.Count(body, `class="tile__avatar" src=`) != 3 || !strings.Contains(body, "Design the world") {
 		t.Fatalf("sheets not drawn:\n%s", body)
 	}
 	_, body = e.get(page)

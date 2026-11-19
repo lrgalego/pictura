@@ -49,6 +49,7 @@ var Catalog = []Model{
 const (
 	Script     = "script"
 	Sheets     = "sheets"
+	World      = "world"
 	Storyboard = "storyboard"
 	Pages      = "pages"
 	Voices     = "voice"
@@ -66,6 +67,7 @@ type Role struct {
 var Roles = []Role{
 	{Script, Text, "Script reader", "Read by"},
 	{Sheets, Image, "Character artist", "Sheets drawn by"},
+	{World, Image, "Concept artist", "Concept art drawn by"},
 	{Storyboard, Text, "Storyboard artist", "Planned by"},
 	{Pages, Image, "Page artist", "Pages drawn by"},
 	{Voices, Voice, "Voice", "Voiced by"},

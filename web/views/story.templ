@@ -166,6 +166,7 @@ type LookView struct {
 	Style   string // the slug shown checked
 	Started bool   // sheets have been drawn or asked for
 	Sheets  int    // characters with a drawn sheet, redrawn on a change
+	Art     int    // places and props with concept art, redrawn too
 	Pages   int    // drawn pages that would need redrawing
 	Error   string
 	Pick    ModelPick // who draws the sheets
@@ -195,7 +196,7 @@ templ LookStep(v LookView) {
 			</div>
 		</fieldset>
 		@ModelPicker(v.Pick)
-		if v.Sheets > 0 {
+		if v.Sheets > 0 || v.Art > 0 {
 			<p class="note">{ lookChangeNote(v) }</p>
 		} else {
 			<p class="note">You can change it later from the Look step. If the cast is already drawn by then, it is redrawn in the new look.</p>
@@ -274,6 +275,7 @@ templ stepper(st *store.Story, current int) {
 		@stepItem(st, store.StepScript, "Script", current)
 		@stepItem(st, store.StepLook, "Look", current)
 		@stepItem(st, store.StepCharacters, "Characters", current)
+		@stepItem(st, store.StepWorld, "World", current)
 		@stepItem(st, store.StepPages, "Storyboard", current)
 		@stepItem(st, store.StepBook, "Comic", current)
 	</ol>
@@ -427,6 +429,7 @@ type CharactersView struct {
 	Working    bool                  // anything is running: keep polling
 	Refs        []*store.Ref
 	PageCount   int
+	WorldCount  int                            // places and props found: the next step has begun
 	AllReady    bool                          // every sheet is drawn: storyboarding may start
 	Suggestions map[int64][]store.LibraryEntry // per character without a sheet: same-named characters from other stories
 	Lineage     map[int64][]*store.Story       // per character: other stories it also appears in
@@ -466,7 +469,7 @@ templ castToolbar(v CharactersView, bottom bool) {
 	<div class={ "toolbar", templ.KV("toolbar--bottom", bottom) }>
 		if !bottom {
 			if v.AllReady {
-				<span class="note">{ plural(len(v.Characters), "character", "characters") + " in the cast. Open one to adjust or redraw it; storyboard when the looks are right." }</span>
+				<span class="note">{ plural(len(v.Characters), "character", "characters") + " in the cast. Open one to adjust or redraw it; design the places and props when the looks are right." }</span>
 			} else {
 				<span class="note">{ plural(len(v.Characters), "character", "characters") + " found. Open any of them to check the description, add references or reuse a familiar face; then draw the sheets." }</span>
 			}
@@ -482,10 +485,10 @@ templ castToolbar(v CharactersView, bottom bool) {
 		if v.AllReady {
 			<form hx-post={ base(v.Story) + "/characters/approve" } hx-target="#step-panel" hx-swap="outerMorph">
 				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
-					if v.PageCount > 0 {
-						Storyboard again
+					if v.WorldCount > 0 {
+						On to the world
 					} else {
-						Storyboard the pages
+						Design the world
 					}
 					@components.IconArrowRight()
 				}

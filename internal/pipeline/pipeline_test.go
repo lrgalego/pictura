@@ -110,12 +110,12 @@ func TestPagePrompt(t *testing.T) {
 		{Number: 1, Shot: "wide", Setting: "lighthouse stairs, storm light.", Description: "Mara climbs", Characters: []string{"Mara"}, Caption: "Rain hammered.", Dialogue: []store.Line{{Character: "Mara", Text: "Hello?"}, {Character: "Deep Voice", Text: "Go back."}}, SFX: "CRASH!"},
 		{Number: 2, Shot: "close-up", Description: "She listens."},
 	}}
-	p := PagePrompt(story(), []*store.Character{mara()}, page, "")
+	p := PagePrompt(story(), []*store.Character{mara()}, nil, page, "")
 	if strings.Contains(p, "Staging") {
 		t.Fatal("no staging line for panels without one")
 	}
 	page.Panels[1].Staging = "two rowboats side by side: Mara in the left one."
-	if got := PagePrompt(story(), []*store.Character{mara()}, page, ""); !strings.Contains(got, "PANEL 2 (close-up shot): Staging, the same in every panel that has it: two rowboats side by side: Mara in the left one. She listens.") {
+	if got := PagePrompt(story(), []*store.Character{mara()}, nil, page, ""); !strings.Contains(got, "PANEL 2 (close-up shot): Staging, the same in every panel that has it: two rowboats side by side: Mara in the left one. She listens.") {
 		t.Fatalf("staging goes to the artist before the moment:\n%s", got)
 	}
 	if d := describePage(page); !strings.Contains(d, "(staging: two rowboats side by side") {
@@ -130,7 +130,7 @@ func TestPagePrompt(t *testing.T) {
 		t.Fatal("page 1 is the opening page and has no revision notes")
 	}
 	page.Number = 2
-	p = PagePrompt(story(), nil, page, "less rain")
+	p = PagePrompt(story(), nil, nil, page, "less rain")
 	if !strings.Contains(p, "This is an interior page, not the opening one: no title") || strings.Contains(p, "page 2") || !strings.Contains(p, "Revision notes from the writer, apply them: less rain") {
 		t.Fatalf("interior page prompt:\n%s", p)
 	}
@@ -209,7 +209,7 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 		t.Fatalf("adjust one without references: %q", r.user)
 	}
 
-	pages, err := Breakdown(ctx, r, st, []*store.Character{mara()})
+	pages, err := Breakdown(ctx, r, st, []*store.Character{mara()}, nil)
 	if err != nil || len(pages) == 0 || pages[0].Number != 1 || pages[0].Panels[0].Number != 1 {
 		t.Fatalf("breakdown: %+v %v", pages, err)
 	}
@@ -222,7 +222,7 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 	}
 
 	existing := []*store.Page{{Number: 1, Title: "One", Summary: "s", Panels: []store.Panel{{Number: 1, Shot: "wide", Description: "d", Caption: "c", Dialogue: []store.Line{{Character: "Mara", Text: "hi"}}}, {Number: 2, Shot: "close-up", Setting: "the attic", Description: "e", SFX: "BANG!"}}}}
-	pages, err = AdjustBreakdown(ctx, r, st, []*store.Character{mara()}, existing, "make it longer")
+	pages, err = AdjustBreakdown(ctx, r, st, []*store.Character{mara()}, nil, existing, "make it longer")
 	if err != nil || len(pages) == 0 {
 		t.Fatalf("adjust breakdown: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestTextStepsBuildTheRightPrompts(t *testing.T) {
 		t.Fatalf("adjust breakdown prompt: %q", r.user)
 	}
 
-	page, err := AdjustPage(ctx, r, st, []*store.Character{mara()}, existing[0], "split panel 1")
+	page, err := AdjustPage(ctx, r, st, []*store.Character{mara()}, nil, existing[0], "split panel 1")
 	if err != nil || page.Number != 1 {
 		t.Fatalf("adjust page: %+v %v", page, err)
 	}
@@ -263,12 +263,12 @@ func (e editor) ChatJSON(ctx context.Context, system, user string, images []Imag
 
 func TestBreakdownReview(t *testing.T) {
 	ctx := context.Background()
-	pages, err := Breakdown(ctx, editor{problems: []string{"p1 panel 1: reaction before its cause"}}, story(), nil)
+	pages, err := Breakdown(ctx, editor{problems: []string{"p1 panel 1: reaction before its cause"}}, story(), nil, nil)
 	if err != nil || len(pages) != 1 || pages[0].Title != "Fixed" || pages[0].Number != 1 || pages[0].Panels[1].Number != 2 {
 		t.Fatalf("the editor's fixes replace the draft, renumbered: %+v %v", pages, err)
 	}
 	for _, e := range []editor{{}, {err: errors.New("boom")}} {
-		pages, err = Breakdown(ctx, e, story(), nil)
+		pages, err = Breakdown(ctx, e, story(), nil, nil)
 		if err != nil || len(pages) != 1 || pages[0].Title != "Draft" {
 			t.Fatalf("no problems found, or the review failed: the draft stands: %+v %v", pages, err)
 		}
@@ -288,13 +288,13 @@ func TestTextStepsPropagateErrors(t *testing.T) {
 	if _, err := AdjustCharacter(ctx, r, st, mara(), "f", nil); err == nil {
 		t.Fatal("adjust one error")
 	}
-	if _, err := Breakdown(ctx, r, st, nil); err == nil {
+	if _, err := Breakdown(ctx, r, st, nil, nil); err == nil {
 		t.Fatal("breakdown error")
 	}
-	if _, err := AdjustBreakdown(ctx, r, st, nil, nil, "f"); err == nil {
+	if _, err := AdjustBreakdown(ctx, r, st, nil, nil, nil, "f"); err == nil {
 		t.Fatal("adjust breakdown error")
 	}
-	if _, err := AdjustPage(ctx, r, st, nil, &store.Page{Number: 1}, "f"); err == nil {
+	if _, err := AdjustPage(ctx, r, st, nil, nil, &store.Page{Number: 1}, "f"); err == nil {
 		t.Fatal("adjust page error")
 	}
 }
@@ -327,17 +327,17 @@ func TestTextStepsRejectEmptyAnswers(t *testing.T) {
 	if _, err := AdjustCharacter(ctx, empty{}, st, mara(), "f", nil); err == nil || !strings.Contains(err.Error(), "no character") {
 		t.Fatalf("adjust one: %v", err)
 	}
-	if _, err := Breakdown(ctx, empty{}, st, nil); err == nil || !strings.Contains(err.Error(), "no pages") {
+	if _, err := Breakdown(ctx, empty{}, st, nil, nil); err == nil || !strings.Contains(err.Error(), "no pages") {
 		t.Fatalf("breakdown: %v", err)
 	}
-	if _, err := AdjustBreakdown(ctx, empty{}, st, nil, nil, "f"); err == nil || !strings.Contains(err.Error(), "no pages") {
+	if _, err := AdjustBreakdown(ctx, empty{}, st, nil, nil, nil, "f"); err == nil || !strings.Contains(err.Error(), "no pages") {
 		t.Fatalf("adjust breakdown: %v", err)
 	}
 }
 
 func TestReferenceLabels(t *testing.T) {
 	ash, emmy := &store.Character{Name: "Ash"}, &store.Character{Name: "Emmy"}
-	refs := PageRefs([]*store.Character{ash, emmy}, [][]byte{{1}})
+	refs := PageRefs([]*store.Character{ash, emmy}, [][]byte{{1}}, nil, nil)
 	if len(refs) != 1 || refs[0].Label != "Reference image 1: the character sheet of Ash. Every time Ash appears, draw them exactly like this." {
 		t.Fatalf("page refs: %+v", refs)
 	}

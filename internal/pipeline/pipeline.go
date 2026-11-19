@@ -142,10 +142,11 @@ var panelSchema = obj(map[string]any{
 	"staging":     str("The standing arrangement in this place that every panel keeps: vehicles, seats, sides and who is in each, in a fixed order (e.g. 'three coaster carts in a row on one track, front to back: Ash, Emmy, Prince, each locked in by a lap bar'). Written once when the arrangement is set up, then repeated word for word until the script changes it — a close-up keeps it too. Empty when nobody holds a place"),
 	"description": str("The one moment drawn: who is where in the frame (left to right, in the order they speak), action, expressions, composition — concrete and visual"),
 	"characters":  arr(str("Cast names of characters visible in the panel, nobody else")),
+	"props":       arr(str("Listed props visible in the panel, by their listed names; empty when none is in the frame or no props are listed")),
 	"dialogue":    arr(lineSchema),
 	"caption":     str("Narration caption box text, or empty string"),
 	"sfx":         str("Sound-effect lettering drawn into the art (e.g. 'SLAM!'), or empty string"),
-}, "number", "shot", "setting", "staging", "description", "characters", "dialogue", "caption", "sfx")
+}, "number", "shot", "setting", "staging", "description", "characters", "props", "dialogue", "caption", "sfx")
 
 var pageSchema = obj(map[string]any{
 	"number":  integer("1-based page number"),
@@ -269,6 +270,7 @@ Panels:
 - Silent actions that carry the story (everyone laughs, everyone turns to look at someone, a character looks away) are drawn in the description of the panel where they happen.
 - Frame what the moment needs and vary the camera: an establishing wide shot whenever the setting is new or changes, close-ups for emotion, medium shots for conversation.
 - characters lists exactly the cast members the description puts in the frame — if the description shows the whole group, list all of them; a close-up holds one or two.
+- When places and props are listed, they are designed already and drawn from their concept art: a panel set in a listed place names it in setting exactly as listed, and props lists every listed prop in the frame by its listed name. Describe them as listed (where the doors and windows are, what is inside and what is outside), never against their design. A place or prop not listed is named with the script's words as usual.
 - Every panel names its setting with the same place name as the panels before it, until the place changes or transforms; then the new name, reused from there on. A flashback names its own setting. A setting is where the characters are in that panel, named with the script's own words for it — not a place from the world's list they are only heading to: until they board, enter or arrive, they are still where they were (the rail platform in the city center is not yet the roller-coaster in the sky).
 - Keep the blocking. When characters hold places for a while — seated in vehicles, around a table, on two sides of a fight — decide the arrangement the first time it appears (who sits where, front to back or left to right, who is next to whom, which vehicle is whose), following every hint the script gives ("separate carts", "from the next track"), and write it in staging; every later panel there repeats it word for word and is drawn to match it. When someone or something joins or leaves (another vehicle rolls in beside them, a character is carried off), rewrite the staging once to the new arrangement — rivals and their vehicles included, whoever left dropped — and repeat that from then on. Characters held in place (strapped in, locked in, caged, tied up) stay held until the script frees them: nobody stands up or walks around. Vehicles and props the script has not brought in are not there.
 
@@ -283,10 +285,10 @@ Pages:
 Use only the given cast for characters on the page. Answer only with JSON matching the schema.`
 
 // Breakdown plans the pages of the book.
-func Breakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character) ([]PageSpec, error) {
+func Breakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, world []*store.Element) ([]PageSpec, error) {
 	lo, hi := pageRange(story.Script)
-	user := fmt.Sprintf("Title: %s\nLogline: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s\n\nThis script needs between %d and %d pages; pick the count the story needs within that range.\n\nSCRIPT:\n%s",
-		story.Title, story.Logline, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), lo, hi, story.Script)
+	user := fmt.Sprintf("Title: %s\nLogline: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s%s\n\nThis script needs between %d and %d pages; pick the count the story needs within that range.\n\nSCRIPT:\n%s",
+		story.Title, story.Logline, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), worldBlock(world), lo, hi, story.Script)
 	var out struct {
 		Pages []PageSpec `json:"pages"`
 	}
@@ -297,7 +299,7 @@ func Breakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Ch
 		return nil, fmt.Errorf("the model returned no pages")
 	}
 	renumber(out.Pages)
-	return reviewBreakdown(ctx, ai, story, chars, out.Pages), nil
+	return reviewBreakdown(ctx, ai, story, chars, world, out.Pages), nil
 }
 
 const reviewerPersona = `You are the editor of a comic adaptation. A storyboard artist drafted the pages below from the script; you check the draft against the script, line by line, before anything is drawn, and fix it.
@@ -308,6 +310,7 @@ Check every panel for:
 - a reaction drawn or spoken before its cause, or a character answered before they have been drawn arriving;
 - more than three balloons or two speakers in a panel, or two moments in one panel;
 - characters that do not match who the description puts in the frame;
+- a listed place or prop named differently from the list, missing from props while in the frame, or described against its design;
 - a setting that does not follow the place the script is in (one place name per place, reused word for word);
 - a scene change the reader cannot follow: a new place with no establishing panel of the arrival, or a setting named for where the characters are going rather than where they are (still on the ground but named as the ride in the sky);
 - blocking that drifts: staging missing once an arrangement is set up, reworded, not updated when someone or a vehicle joins or leaves, or contradicted by a description or the script (a character in another seat or vehicle, sharing a seat they do not share, standing while locked in), or vehicles and props the script has not brought in;
@@ -322,9 +325,9 @@ List each problem you find, then return the whole corrected storyboard: fix only
 // what breaks the rules: a single planning pass still slips now and then on
 // a long script (a line moved, a reaction before its cause). The draft
 // stands if the review fails or finds nothing.
-func reviewBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, draft []PageSpec) []PageSpec {
+func reviewBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, world []*store.Element, draft []PageSpec) []PageSpec {
 	plan, _ := json.Marshal(draft)
-	user := fmt.Sprintf("CAST:\n%s\n\nSCRIPT:\n%s\n\nDRAFT STORYBOARD (JSON):\n%s", describeCast(chars), story.Script, plan)
+	user := fmt.Sprintf("CAST:\n%s%s\n\nSCRIPT:\n%s\n\nDRAFT STORYBOARD (JSON):\n%s", describeCast(chars), worldBlock(world), story.Script, plan)
 	var out struct {
 		Problems []string   `json:"problems"`
 		Pages    []PageSpec `json:"pages"`
@@ -337,9 +340,9 @@ func reviewBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*st
 }
 
 // AdjustBreakdown revises every page according to feedback.
-func AdjustBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, pages []*store.Page, feedback string) ([]PageSpec, error) {
-	user := fmt.Sprintf("Title: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s\n\nCURRENT PAGES:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn the full revised page list applying the feedback; keep pages the feedback does not touch as they are.\n\nSCRIPT (for reference):\n%s",
-		story.Title, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), describePages(pages), feedback, story.Script)
+func AdjustBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, world []*store.Element, pages []*store.Page, feedback string) ([]PageSpec, error) {
+	user := fmt.Sprintf("Title: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s%s\n\nCURRENT PAGES:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn the full revised page list applying the feedback; keep pages the feedback does not touch as they are.\n\nSCRIPT (for reference):\n%s",
+		story.Title, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), worldBlock(world), describePages(pages), feedback, story.Script)
 	var out struct {
 		Pages []PageSpec `json:"pages"`
 	}
@@ -354,9 +357,9 @@ func AdjustBreakdown(ctx context.Context, ai AI, story *store.Story, chars []*st
 }
 
 // AdjustPage revises a single page according to feedback.
-func AdjustPage(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, page *store.Page, feedback string) (*PageSpec, error) {
-	user := fmt.Sprintf("Title: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s\n\nPAGE %d:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn this one page revised per the feedback, same page number.",
-		story.Title, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), page.Number, describePage(page), feedback)
+func AdjustPage(ctx context.Context, ai AI, story *store.Story, chars []*store.Character, world []*store.Element, page *store.Page, feedback string) (*PageSpec, error) {
+	user := fmt.Sprintf("Title: %s\nWorld: %s\nArt direction: %s\n\nCAST:\n%s%s\n\nPAGE %d:\n%s\n\nWRITER'S FEEDBACK:\n%s\n\nReturn this one page revised per the feedback, same page number.",
+		story.Title, story.World, StyleBySlug(story.Style).Direction, describeCast(chars), worldBlock(world), page.Number, describePage(page), feedback)
 	var out struct {
 		Page PageSpec `json:"page"`
 	}
@@ -464,16 +467,23 @@ Layout, on a plain white background with no text other than the character's name
 // than eight characters.
 const MaxPageRefs = 8
 
-// PageRefs labels the sheets that ride along with a page, in cast order,
-// each with the character it is: a name right by its image is what keeps
-// that character on-model in every panel.
-func PageRefs(cast []*store.Character, sheets [][]byte) []Image {
-	out := make([]Image, 0, len(cast))
+// PageRefs labels the images that ride along with a page: the sheets in
+// cast order, each with the character it is — a name right by its image is
+// what keeps that character on-model in every panel — then the concept art
+// of its places and props.
+func PageRefs(cast []*store.Character, sheets [][]byte, world []*store.Element, art [][]byte) []Image {
+	out := make([]Image, 0, len(cast)+len(world))
 	for i, c := range cast {
 		if i >= len(sheets) {
 			break
 		}
 		out = append(out, Image{Label: fmt.Sprintf("Reference image %d: the character sheet of %s. Every time %s appears, draw them exactly like this.", i+1, c.Name, c.Name), PNG: sheets[i]})
+	}
+	for i, e := range world {
+		if i >= len(art) {
+			break
+		}
+		out = append(out, Image{Label: worldLabel(e, len(out)+1), PNG: art[i]})
 	}
 	return out
 }
@@ -510,8 +520,9 @@ func PageCast(chars []*store.Character, page *store.Page, max int) []*store.Char
 }
 
 // PagePrompt is the page prompt; the character sheets ride along as
-// reference images so the cast stays on-model.
-func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, feedback string) string {
+// reference images so the cast stays on-model, then the concept art of the
+// page's places and props (world) so they stay as designed.
+func PagePrompt(story *store.Story, chars []*store.Character, world []*store.Element, page *store.Page, feedback string) string {
 	style := StyleBySlug(story.Style).Direction
 	var b strings.Builder
 	fmt.Fprintf(&b, "A finished comic book page, %s. Portrait page, %d panels laid out in a clean comic grid with white gutters and bold panel borders, read left to right, top to bottom. World: %s\n", style, len(page.Panels), story.World)
@@ -529,10 +540,23 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 			sheet[strings.ToLower(c.Name)] = i + 1
 		}
 	}
+	art := map[int64]int{}
+	if len(world) > 0 {
+		b.WriteString("The reference images after the character sheets are the concept art of the story's places and props: draw them exactly as designed — the same architecture, layout, shapes and colors.\n")
+		for i, e := range world {
+			n := len(chars) + i + 1
+			art[e.ID] = n
+			if e.IsPlace() {
+				fmt.Fprintf(&b, "Reference image %d = %s (place: %s Layout: %s).\n", n, e.Name, strings.TrimSpace(e.Visual), strings.TrimSpace(e.Layout))
+			} else {
+				fmt.Fprintf(&b, "Reference image %d = %s (prop: %s).\n", n, e.Name, strings.TrimSpace(e.Visual))
+			}
+		}
+	}
 	for _, p := range page.Panels {
 		fmt.Fprintf(&b, "\nPANEL %d (%s shot):", p.Number, p.Shot)
 		if p.Setting != "" {
-			fmt.Fprintf(&b, " Setting: %s.", strings.TrimRight(p.Setting, ". "))
+			fmt.Fprintf(&b, " Setting: %s%s.", strings.TrimRight(p.Setting, ". "), placeRef(world, art, p.Setting))
 		}
 		if p.Staging != "" {
 			fmt.Fprintf(&b, " Staging, the same in every panel that has it: %s.", strings.TrimRight(p.Staging, ". "))
@@ -558,6 +582,9 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 				fmt.Fprintf(&b, " Characters present, each drawn once: %s.", strings.Join(present, ", "))
 			}
 		}
+		if props := propRefs(world, art, p); len(props) > 0 {
+			fmt.Fprintf(&b, " Props in the frame, as designed: %s.", strings.Join(props, ", "))
+		}
 		if p.Caption != "" {
 			fmt.Fprintf(&b, " Caption box: %q.", p.Caption)
 		}
@@ -575,12 +602,40 @@ func PagePrompt(story *store.Story, chars []*store.Character, page *store.Page, 
 	if len(sheet) > 0 {
 		b.WriteString("\n\n" + likeness)
 	}
+	if len(world) > 0 {
+		b.WriteString("\n\n" + worldRule)
+	}
 	b.WriteString("\n\n" + continuity)
 	b.WriteString("\n\nLetter every caption, speech bubble and sound effect legibly in a comic font with the exact text given, each exactly once and only in its own panel. Within a panel, place bubbles in the order listed, left to right and top to bottom, so they read in that order, each tail pointing at its speaker. No other text, no watermark, no page number.")
 	if strings.TrimSpace(feedback) != "" {
 		fmt.Fprintf(&b, "\n\nRevision notes from the writer, apply them: %s", feedback)
 	}
 	return b.String()
+}
+
+// placeRef points a panel's setting at the concept art of its place.
+func placeRef(world []*store.Element, art map[int64]int, setting string) string {
+	for _, e := range world {
+		if e.IsPlace() && samePlace(setting, e.Name) {
+			if e.Name != setting && !strings.EqualFold(bare(e.Name), bare(setting)) {
+				return fmt.Sprintf(" (%s, reference image %d)", e.Name, art[e.ID])
+			}
+			return fmt.Sprintf(" (reference image %d)", art[e.ID])
+		}
+	}
+	return ""
+}
+
+// propRefs names the designed props a panel shows, each with its art.
+func propRefs(world []*store.Element, art map[int64]int, p store.Panel) []string {
+	words := strings.ToLower(p.Staging + " " + p.Description)
+	var out []string
+	for _, e := range world {
+		if !e.IsPlace() && (listed(p.Props, e.Name) || mentions(words, e.Name)) {
+			out = append(out, fmt.Sprintf("%s (reference image %d)", e.Name, art[e.ID]))
+		}
+	}
+	return out
 }
 
 // likeness and continuity close every page prompt. Rendering story pages
@@ -619,6 +674,9 @@ func describePage(p *store.Page) string {
 			fmt.Fprintf(&b, " (staging: %s)", pn.Staging)
 		}
 		fmt.Fprintf(&b, ": %s [%s]", pn.Description, strings.Join(pn.Characters, ", "))
+		if len(pn.Props) > 0 {
+			fmt.Fprintf(&b, " props: %s", strings.Join(pn.Props, ", "))
+		}
 		if pn.Caption != "" {
 			fmt.Fprintf(&b, " caption: %q", pn.Caption)
 		}

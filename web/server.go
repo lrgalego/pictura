@@ -139,6 +139,22 @@ func Router(d Deps) http.Handler {
 	mux.Handle("POST /stories/{id}/models", auth(s.setModel))
 	mux.Handle("POST /stories/{id}/voices/cast", auth(s.castVoices))
 
+	mux.Handle("GET /stories/{id}/world", auth(s.worldPage))
+	mux.Handle("GET /stories/{id}/world/panel", auth(s.worldPanel))
+	mux.Handle("POST /stories/{id}/world/read", auth(s.worldRead))
+	mux.Handle("POST /stories/{id}/world/draw", auth(s.worldDraw))
+	mux.Handle("GET /stories/{id}/world/adjust", auth(s.worldAdjustDialog))
+	mux.Handle("POST /stories/{id}/world/adjust", auth(s.worldAdjust))
+	mux.Handle("POST /stories/{id}/world/approve", auth(s.worldApprove))
+	mux.Handle("GET /stories/{id}/world/{eid}/view", auth(s.elementLightbox))
+	mux.Handle("GET /stories/{id}/world/{eid}/adjust", auth(s.elementAdjustDialog))
+	mux.Handle("POST /stories/{id}/world/{eid}/adjust", auth(s.elementAdjust))
+	mux.Handle("GET /stories/{id}/world/{eid}/edit", auth(s.elementEditDialog))
+	mux.Handle("POST /stories/{id}/world/{eid}/edit", auth(s.elementEdit))
+	mux.Handle("POST /stories/{id}/world/{eid}/redraw", auth(s.elementRedraw))
+	mux.Handle("GET /stories/{id}/world/{eid}/delete", auth(s.elementDeleteDialog))
+	mux.Handle("POST /stories/{id}/world/{eid}/delete", auth(s.elementDelete))
+
 	mux.Handle("GET /stories/{id}/pages", auth(s.pagesPage))
 	mux.Handle("GET /stories/{id}/pages/panel", auth(s.pagesPanel))
 	mux.Handle("GET /stories/{id}/pages/adjust", auth(s.pagesAdjustDialog))
@@ -346,6 +362,8 @@ func stepURL(st *store.Story) string {
 		return base + "/look"
 	case store.StepCharacters:
 		return base + "/characters"
+	case store.StepWorld:
+		return base + "/world"
 	case store.StepPages:
 		return base + "/pages"
 	case store.StepBook:

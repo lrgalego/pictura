@@ -27,6 +27,8 @@ func stepHref(st *store.Story, n int) string {
 		return base(st) + "/look"
 	case store.StepCharacters:
 		return base(st) + "/characters"
+	case store.StepWorld:
+		return base(st) + "/world"
 	case store.StepPages:
 		return base(st) + "/pages"
 	case store.StepBook:
@@ -38,20 +40,26 @@ func stepHref(st *store.Story, n int) string {
 func stepLabel(step int) string {
 	switch step {
 	case store.StepLook:
-		return "Step 2 of 5: look"
+		return "Step 2 of 6: look"
 	case store.StepCharacters:
-		return "Step 3 of 5: characters"
+		return "Step 3 of 6: characters"
+	case store.StepWorld:
+		return "Step 4 of 6: world"
 	case store.StepPages:
-		return "Step 4 of 5: storyboard"
+		return "Step 5 of 6: storyboard"
 	case store.StepBook:
-		return "Step 5 of 5: comic"
+		return "Step 6 of 6: comic"
 	}
-	return "Step 1 of 5: script"
+	return "Step 1 of 6: script"
 }
 
 // lookChangeNote says what switching the look redraws once the cast is drawn.
 func lookChangeNote(v LookView) string {
-	n := "Switching the look redraws " + plural(v.Sheets, "drawn character sheet", "drawn character sheets") + " in the new style, each keeping its design"
+	n := "Switching the look redraws " + plural(v.Sheets, "drawn character sheet", "drawn character sheets")
+	if v.Art > 0 {
+		n += " and " + plural(v.Art, "piece of concept art", "pieces of concept art")
+	}
+	n += " in the new style, each keeping its design"
 	if v.Pages > 0 {
 		n += "; " + plural(v.Pages, "drawn page", "drawn pages") + " will need drawing again"
 	}
@@ -154,6 +162,16 @@ func jobFailure(j *store.Job) (title, hint string) {
 		title = "Drawing the character sheets failed"
 	case "restyle":
 		title = "Redrawing the cast in the new look failed"
+	case "world":
+		title = "Finding the places and props failed"
+	case "world-art":
+		title = "Drawing the concept art failed"
+	case "world-adjust":
+		title = "Revising the places and props failed"
+	case "element", "element-edit":
+		title = "Revising the place or prop failed"
+	case "element-art":
+		title = "Drawing the concept art failed"
 	case "breakdown":
 		title = "Storyboarding failed"
 	case "pages":
@@ -217,6 +235,12 @@ func jobRetry(st *store.Story, j *store.Job, step int) (retryAction, bool) {
 		return retryAction{URL: base(st) + "/characters/restyle", Label: "Redraw the rest in the new look"}, true
 	case step == store.StepCharacters && j.Kind == "cast":
 		return retryAction{URL: base(st) + "/characters/adjust", Label: "Adjust the cast again", Dialog: true}, true
+	case step == store.StepWorld && j.Kind == "world":
+		return retryAction{URL: base(st) + "/world/read", Label: "Look for them again"}, true
+	case step == store.StepWorld && (j.Kind == "world-art" || j.Kind == "element-art" || j.Kind == "element" || j.Kind == "element-edit"):
+		return retryAction{URL: base(st) + "/world/draw", Label: "Draw the missing art"}, true
+	case step == store.StepWorld && j.Kind == "world-adjust":
+		return retryAction{URL: base(st) + "/world/adjust", Label: "Adjust the world again", Dialog: true}, true
 	case step == store.StepPages && j.Kind == "breakdown":
 		return retryAction{URL: base(st) + "/pages/restart", Label: "Storyboard again"}, true
 	case step == store.StepPages && j.Kind == "pages":

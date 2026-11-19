@@ -211,31 +211,44 @@ CREATE INDEX IF NOT EXISTS page_lines_page ON page_lines(page_id, seq);
 	if err := s.migrateAdmin(); err != nil {
 		return err
 	}
+	if err := s.migrateWorld(); err != nil {
+		return err
+	}
 	return s.renumberSteps()
 }
 
-// renumberSteps runs once (PRAGMA user_version 0 → 1): the look became its
-// own step 2, so stories past the script move up one.
+// stepInserts are the steps added to the workflow over time, by the
+// user_version that added them: a story at or past the new step's number
+// moves up one, so it stays on the step it was on.
+var stepInserts = []int{
+	StepLook,  // version 1: the look became its own step
+	StepWorld, // version 2: places and props got concept art before the storyboard
+}
+
+// renumberSteps applies each step insert a database has not seen yet.
 func (s *Store) renumberSteps() error {
 	var v int
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		return err
 	}
-	if v >= 1 {
-		return nil
+	for ; v < len(stepInserts); v++ {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE stories SET step = step + 1 WHERE step >= ?`, stepInserts[v]); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v+1)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE stories SET step = step + 1 WHERE step >= 2`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`PRAGMA user_version = 1`); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 // addColumn adds a column when it is missing (SQLite has no IF NOT EXISTS
@@ -390,8 +403,9 @@ const (
 	StepScript     = 1
 	StepLook       = 2
 	StepCharacters = 3
-	StepPages      = 4
-	StepBook       = 5
+	StepWorld      = 4
+	StepPages      = 5
+	StepBook       = 6
 )
 
 type Story struct {
@@ -412,7 +426,7 @@ type Story struct {
 	// a role not in it uses the default. Only SetStoryModel writes it.
 	Models    map[string]string
 	CreatedAt time.Time
-	UpdatedAt     time.Time
+	UpdatedAt time.Time
 }
 
 // CreateStory saves a new story; with its script written it is at the look.
@@ -677,6 +691,7 @@ type Panel struct {
 	Staging     string   `json:"staging,omitempty"` // who is where in that place (seats, vehicles, sides), so the art keeps its blocking
 	Description string   `json:"description"`
 	Characters  []string `json:"characters"`
+	Props       []string `json:"props,omitempty"` // the story's props in the frame, by name, so the art draws them as designed
 	Dialogue    []Line   `json:"dialogue"`
 	Caption     string   `json:"caption"`
 	SFX         string   `json:"sfx,omitempty"` // sound-effect lettering drawn into the art
@@ -1037,13 +1052,14 @@ func (s *Store) ImageNames(ctx context.Context) ([]string, error) {
 }
 
 // Sweep is the garbage collector: it deletes every image (and narration
-// clip) the story owns that no character sheet, page, reference or read
+// clip) the story owns that no character sheet, concept art, page, reference or read
 // line points at any more (art that was redrawn, references removed with
 // their character, clips of a line re-read or re-voiced), and returns how
 // many were reclaimed. storyID 0 sweeps every story.
 func (s *Store) Sweep(ctx context.Context, storyID int64) (int, error) {
 	q := `SELECT name FROM images i
 		WHERE NOT EXISTS (SELECT 1 FROM characters c WHERE c.sheet_image = i.name)
+		  AND NOT EXISTS (SELECT 1 FROM elements e WHERE e.art_image = i.name)
 		  AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.image = i.name)
 		  AND NOT EXISTS (SELECT 1 FROM refs r WHERE r.image = i.name)
 		  AND NOT EXISTS (SELECT 1 FROM page_lines l WHERE l.audio = i.name)`

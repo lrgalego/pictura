@@ -388,7 +388,7 @@ func TestReadPageOnTheFake(t *testing.T) {
 		{Number: 2, Dialogue: []store.Line{{Character: "Pip", Text: "Please don't scream."}}},
 		{Number: 3},
 	}}
-	art, err := f.EditImage(context.Background(), PagePrompt(&store.Story{Style: "comic"}, chars, page, ""), nil, PageSize)
+	art, err := f.EditImage(context.Background(), PagePrompt(&store.Story{Style: "comic"}, chars, nil, page, ""), nil, PageSize)
 	if err != nil {
 		t.Fatal(err)
 	}

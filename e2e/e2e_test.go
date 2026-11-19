@@ -290,7 +290,7 @@ func TestScriptToComic(t *testing.T) {
 	must(t, page.Locator("button:has-text('Draw the character sheets')").First().Click())
 	must(t, expect.Locator(page.Locator(".job__title")).ToContainText("Drawing character sheets"))
 	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(3))
-	must(t, expect.Locator(page.Locator("button:has-text('Storyboard the pages')").First()).ToBeVisible())
+	must(t, expect.Locator(page.Locator("button:has-text('Design the world')").First()).ToBeVisible())
 
 	// The sheet and its lightbox on the character page; redraw from there.
 	openCharacter(t, page, "Mara")
@@ -304,6 +304,25 @@ func TestScriptToComic(t *testing.T) {
 	settled(t, page)
 	must(t, page.Locator(".rail__back").Click())
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/characters$`)))
+
+	// The world: the places and props are found, one is changed from its
+	// dialog, the art is drawn and opens in the viewer.
+	must(t, page.Locator("button:has-text('Design the world')").First().Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/world$`)))
+	must(t, expect.Locator(page.Locator(".world-card")).ToHaveCount(2))
+	settled(t, page)
+	must(t, page.Locator(".world-card button:has-text('Change')").Last().Click())
+	must(t, expect.Locator(page.Locator(".dialog")).ToContainText("Change the brass lantern"))
+	must(t, page.Fill("#feedback", "a green lantern"))
+	must(t, page.Click(".dialog button:has-text('Change it')"))
+	must(t, expect.Locator(page.Locator(".dialog")).ToHaveCount(0))
+	settled(t, page)
+	must(t, expect.Locator(page.Locator(".world-card").Last()).ToContainText("revised: a green lantern"))
+	throughTheWorld(t, page)
+	must(t, page.Locator(".world-card .char__sheet-btn").First().Click())
+	must(t, expect.Locator(page.Locator(".lightbox__caption")).ToContainText("concept art"))
+	must(t, page.Keyboard().Press("Escape"))
+	must(t, expect.Locator(page.Locator(".lightbox")).ToHaveCount(0))
 
 	must(t, page.Locator("button:has-text('Storyboard the pages')").First().Click())
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pages$`)))
@@ -367,7 +386,7 @@ func TestScriptToComic(t *testing.T) {
 
 	// The library shows the finished book with a cover, and the cast page lists everyone.
 	must(t, page.Click("a:has-text('Your stories')"))
-	must(t, expect.Locator(page.Locator(".book").First()).ToContainText("Step 5 of 5"))
+	must(t, expect.Locator(page.Locator(".book").First()).ToContainText("Step 6 of 6"))
 	must(t, expect.Locator(page.Locator(".book__cover img")).ToHaveCount(1))
 	must(t, page.Click("a:has-text('Your cast')"))
 	must(t, expect.Locator(page.Locator(".castlib__card")).ToHaveCount(3))
@@ -458,6 +477,17 @@ func TestMobileLayoutHasNoHorizontalOverflow(t *testing.T) {
 	}
 }
 
+// throughTheWorld draws the concept art of the world step's places and
+// props, once they are found.
+func throughTheWorld(t *testing.T, page playwright.Page) {
+	t.Helper()
+	must(t, expect.Locator(page.Locator(".world-card")).ToHaveCount(2))
+	settled(t, page)
+	must(t, page.Locator("button:has-text('Draw the concept art')").First().Click())
+	must(t, expect.Locator(page.Locator(".world-card img")).ToHaveCount(2))
+	settled(t, page)
+}
+
 // drawnComic takes a fresh story from script to drawn book through the UI.
 func drawnComic(t *testing.T, page playwright.Page, user string) int {
 	t.Helper()
@@ -465,6 +495,9 @@ func drawnComic(t *testing.T, page playwright.Page, user string) int {
 	createStory(t, page, "The Lighthouse Keeper's Robot", "Storybook")
 	must(t, page.Locator("button:has-text('Draw the character sheets')").First().Click())
 	must(t, expect.Locator(page.Locator("img.tile__avatar")).ToHaveCount(3))
+	must(t, page.Locator("button:has-text('Design the world')").First().Click())
+	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/world$`)))
+	throughTheWorld(t, page)
 	must(t, page.Locator("button:has-text('Storyboard the pages')").First().Click())
 	must(t, expect.Page(page).ToHaveURL(regexp.MustCompile(`/pages$`)))
 	must(t, expect.Locator(page.Locator("#step-panel[hx-trigger]")).ToHaveCount(0))

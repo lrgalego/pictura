@@ -128,7 +128,7 @@ func Home(loggedIn bool) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><p class=\"hero__note\">Four steps from script to book. Download it as a PDF when you love it.</p></div><div class=\"strip\" aria-hidden=\"true\"><div class=\"panel strip__panel panel--pop\"><span class=\"strip__label\">Your script</span><pre class=\"strip__script\">INT. LIGHTHOUSE. NIGHT. MARA: Did you hear that? PIP (whirring): I hear everything.</pre></div><div class=\"panel strip__panel panel--pop3\"><span class=\"strip__label\">Your cast</span><div class=\"strip__cast\"><span class=\"strip__face\">🧒</span> <span class=\"strip__face\">🤖</span> <span class=\"strip__face\">🕵️</span></div><span class=\"bubble\">Who's there?</span></div><div class=\"panel strip__panel\"><span class=\"strip__label\">Your comic</span><div class=\"strip__grid\"><div class=\"strip__cell\"></div><div class=\"strip__cell\"></div><div class=\"strip__cell\"></div></div></div></div></div></section><section class=\"section\" id=\"how\"><div class=\"wrap\"><h2 class=\"section__title\">How it works</h2><p class=\"section__lede\">Each step waits for you. Ask for changes in plain words and the editor or the artist redoes just that part.</p><div class=\"steps\" data-motion-stagger=\"pop\"><div class=\"panel step\"><div class=\"step__glyph\">📜</div><h3>Paste your script</h3><p>Screenplay, prose, a bedtime story you made up. Pick the look: comic, manga, storybook and more.</p></div><div class=\"panel step\"><div class=\"step__glyph\">🎭</div><h3>Meet your cast</h3><p>Every character gets a written description and a drawn model sheet: faces, poses, outfit, props.</p></div><div class=\"panel step\"><div class=\"step__glyph\">🎬</div><h3>Approve the storyboard</h3><p>The story is broken into pages and panels, with shots and dialogue. Tweak a page or the whole plan.</p></div><div class=\"panel step\"><div class=\"step__glyph\">📖</div><h3>Read your comic</h3><p>Pages are drawn from the sheets so the cast stays on-model. Redraw any page, then download the book.</p></div></div></div></section><section class=\"section\"><div class=\"wrap\"><h2 class=\"section__title\">Pick a look</h2><p class=\"section__lede\">One choice shapes the sheets and every page after them. You can change it later and redraw.</p><div class=\"styles\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><p class=\"hero__note\">Five steps from script to book. Download it as a PDF when you love it.</p></div><div class=\"strip\" aria-hidden=\"true\"><div class=\"panel strip__panel panel--pop\"><span class=\"strip__label\">Your script</span><pre class=\"strip__script\">INT. LIGHTHOUSE. NIGHT. MARA: Did you hear that? PIP (whirring): I hear everything.</pre></div><div class=\"panel strip__panel panel--pop3\"><span class=\"strip__label\">Your cast</span><div class=\"strip__cast\"><span class=\"strip__face\">🧒</span> <span class=\"strip__face\">🤖</span> <span class=\"strip__face\">🕵️</span></div><span class=\"bubble\">Who's there?</span></div><div class=\"panel strip__panel\"><span class=\"strip__label\">Your comic</span><div class=\"strip__grid\"><div class=\"strip__cell\"></div><div class=\"strip__cell\"></div><div class=\"strip__cell\"></div></div></div></div></div></section><section class=\"section\" id=\"how\"><div class=\"wrap\"><h2 class=\"section__title\">How it works</h2><p class=\"section__lede\">Each step waits for you. Ask for changes in plain words and the editor or the artist redoes just that part.</p><div class=\"steps\" data-motion-stagger=\"pop\"><div class=\"panel step\"><div class=\"step__glyph\">📜</div><h3>Paste your script</h3><p>Screenplay, prose, a bedtime story you made up. Pick the look: comic, manga, storybook and more.</p></div><div class=\"panel step\"><div class=\"step__glyph\">🎭</div><h3>Meet your cast</h3><p>Every character gets a written description and a drawn model sheet: faces, poses, outfit, props.</p></div><div class=\"panel step\"><div class=\"step__glyph\">🏡</div><h3>Build the world</h3><p>Every place and prop gets concept art, so the kitchen, the car and the magic key look the same on every page.</p></div><div class=\"panel step\"><div class=\"step__glyph\">🎬</div><h3>Approve the storyboard</h3><p>The story is broken into pages and panels, with shots and dialogue. Tweak a page or the whole plan.</p></div><div class=\"panel step\"><div class=\"step__glyph\">📖</div><h3>Read your comic</h3><p>Pages are drawn from the sheets and the concept art, so the cast and the world stay on-model. Redraw any page, then download the book.</p></div></div></div></section><section class=\"section\"><div class=\"wrap\"><h2 class=\"section__title\">Pick a look</h2><p class=\"section__lede\">One choice shapes the sheets and every page after them. You can change it later and redraw.</p><div class=\"styles\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -140,7 +140,7 @@ func Home(loggedIn bool) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(s.Emoji)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 97, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 102, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -153,7 +153,7 @@ func Home(loggedIn bool) templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(s.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 99, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 104, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -166,7 +166,7 @@ func Home(loggedIn bool) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(s.Blurb)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 101, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/views/home.templ`, Line: 106, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {

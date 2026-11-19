@@ -183,8 +183,10 @@ func TestReadAStoryWithoutArt(t *testing.T) {
 	}
 	e.post(base+"/characters/draw", nil, true)
 	e.waitIdle()
-	e.post(base+"/characters/approve", nil, true)
-	e.waitIdle()
+	for _, step := range []string{"/characters/approve", "/world/draw", "/world/approve"} {
+		e.post(base+step, nil, true)
+		e.waitIdle()
+	}
 	for _, p := range e.readJSON(base).Pages {
 		if p.Status != readUndrawn || p.Image != "" {
 			t.Fatalf("an undrawn page: %+v", p)
@@ -202,7 +204,7 @@ func TestReadMarksSoundEffects(t *testing.T) {
 	resp, _ := e.create(map[string][]string{"title": {"Lamp"}, "script": {sfx}, "style": {"comic"}})
 	base := strings.TrimSuffix(resp.Header.Get("Location"), "/characters")
 	e.waitIdle()
-	for _, step := range []string{"/characters/draw", "/characters/approve", "/pages/approve"} {
+	for _, step := range []string{"/characters/draw", "/characters/approve", "/world/draw", "/world/approve", "/pages/approve"} {
 		e.post(base+step, nil, true)
 		e.waitIdle()
 	}

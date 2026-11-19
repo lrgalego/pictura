@@ -157,6 +157,8 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 		v = map[string]any{"pages": pages}
 	case "review":
 		v = map[string]any{"problems": []string{}, "pages": []PageSpec{}} // the draft stands
+	case "world":
+		v = map[string]any{"elements": fakeWorld(user)}
 	case "voices":
 		v = fakeCasting(user)
 	case "lettering":
@@ -177,6 +179,32 @@ func (f *Fake) ChatJSON(ctx context.Context, system, user string, images []Image
 	}
 	b, _ := json.Marshal(v)
 	return json.Unmarshal(b, out)
+}
+
+// fakeWorld is the canned world: the harbour every fake panel is set in
+// and a lantern. A revision of one element returns it with the feedback
+// noted; a revision of the whole world notes it on each.
+func fakeWorld(user string) []ElementSpec {
+	specs := []ElementSpec{
+		{Kind: "place", Name: "the harbour at dusk", Visual: "A crescent of crooked timber houses painted teal, ochre and brick red around a stone quay, brass lampposts, fishing boats with patched sails.", Layout: "The quay runs left to right across the front; the houses stand behind it, the lighthouse on the far right, the open sea on the left."},
+		{Kind: "prop", Name: "the brass lantern", Visual: "A hand lantern of dented brass with four green glass panes and a ring handle.", Layout: "As tall as a forearm; carried by the ring."},
+	}
+	fb := after(user, "WRITER'S FEEDBACK:")
+	line := strings.TrimSpace(strings.SplitN(fb, "\n", 2)[0])
+	if block := after(user, "ELEMENT:"); block != "" && strings.HasPrefix(strings.TrimSpace(block), "- ") {
+		head := strings.TrimPrefix(strings.TrimSpace(block), "- ")
+		name := strings.TrimSpace(head[:max(0, strings.LastIndex(strings.SplitN(head, "\n", 2)[0], " ("))])
+		one := specs[1]
+		one.Name = name
+		one.Visual += " (revised: " + line + ")"
+		return []ElementSpec{one}
+	}
+	if line != "" {
+		for i := range specs {
+			specs[i].Visual += " (revised: " + line + ")"
+		}
+	}
+	return specs
 }
 
 // fakeCasting deals catalog voices in order to the characters listed under

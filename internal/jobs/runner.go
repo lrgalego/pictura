@@ -261,6 +261,10 @@ func (r *Runner) Analyze(storyID int64) error {
 		if err := r.st.DeleteCharacters(ctx, storyID); err != nil {
 			return err
 		}
+		// The places and props were found in the old script.
+		if err := r.st.DeleteElements(ctx, storyID); err != nil {
+			return err
+		}
 		for i, spec := range an.Characters {
 			c := fromSpec(storyID, i, spec)
 			if err := r.st.InsertCharacter(ctx, c); err != nil {
@@ -348,11 +352,11 @@ func (r *Runner) DrawSheets(storyID int64) error {
 	})
 }
 
-// Restyle redraws drawn sheets in the story's new look, each from its old
-// sheet so the designs carry over. With all set every drawn sheet is
-// redrawn (the look just changed); without, only those a failed restyle
-// left behind, which still hold their old sheet. The storyboard stays;
-// drawn pages go stale and are redrawn with the new sheets.
+// Restyle redraws drawn sheets and concept art in the story's new look,
+// each from its old drawing so the designs carry over. With all set every
+// drawing is redone (the look just changed); without, only those a failed
+// restyle left behind, which still hold their old drawing. The storyboard
+// stays; drawn pages go stale and are redrawn with the new art.
 func (r *Runner) Restyle(storyID int64, all bool) error {
 	return r.start(storyID, "restyle", "Redrawing the cast in the new look…", 0, func(ctx context.Context, report reporter) error {
 		story, err := r.st.Story(ctx, storyID)
@@ -374,8 +378,27 @@ func (r *Runner) Restyle(storyID int64, all bool) error {
 			}
 			todo = append(todo, c)
 		}
+		world, err := r.st.Elements(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		var places []*store.Element
+		for _, e := range world {
+			if e.ArtImage == "" || (!all && e.ArtStatus == store.ImageReady) {
+				continue
+			}
+			if all {
+				e.ArtStatus = store.ImagePending
+				_ = r.st.SetElementArt(ctx, e.ID, e.ArtImage, store.ImagePending, "")
+			}
+			places = append(places, e)
+		}
 		r.invalidatePages(ctx, storyID)
-		return r.drawSheetsAs(ctx, story, todo, true, report)
+		castErr := r.drawSheetsAs(ctx, story, todo, true, report)
+		if err := r.drawWorld(ctx, story, places, true, report); err != nil && castErr == nil {
+			return err
+		}
+		return castErr
 	})
 }
 
@@ -747,7 +770,7 @@ func (r *Runner) invalidatePages(ctx context.Context, storyID int64) {
 	}
 }
 
-// ---------- step 3: pages ----------
+// ---------- step 5: the storyboard ----------
 
 // Breakdown plans the pages from the script and the approved cast.
 func (r *Runner) Breakdown(storyID int64) error {
@@ -760,7 +783,11 @@ func (r *Runner) Breakdown(storyID int64) error {
 		if err != nil {
 			return err
 		}
-		specs, err := pipeline.Breakdown(ctx, r.aiFor(story, models.Storyboard), story, chars)
+		world, err := r.st.Elements(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		specs, err := pipeline.Breakdown(ctx, r.aiFor(story, models.Storyboard), story, chars, world)
 		if err != nil {
 			return err
 		}
@@ -791,7 +818,11 @@ func (r *Runner) AdjustPages(storyID int64, feedback string) error {
 		if err != nil {
 			return err
 		}
-		specs, err := pipeline.AdjustBreakdown(ctx, r.aiFor(story, models.Storyboard), story, chars, pages, feedback)
+		world, err := r.st.Elements(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		specs, err := pipeline.AdjustBreakdown(ctx, r.aiFor(story, models.Storyboard), story, chars, world, pages, feedback)
 		if err != nil {
 			return err
 		}
@@ -847,7 +878,11 @@ func (r *Runner) AdjustPage(storyID, pageID int64, feedback string) error {
 		if err != nil || page.StoryID != storyID {
 			return store.ErrNotFound
 		}
-		spec, err := pipeline.AdjustPage(ctx, r.aiFor(story, models.Storyboard), story, chars, page, feedback)
+		world, err := r.st.Elements(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		spec, err := pipeline.AdjustPage(ctx, r.aiFor(story, models.Storyboard), story, chars, world, page, feedback)
 		if err != nil {
 			return err
 		}
@@ -859,7 +894,7 @@ func (r *Runner) AdjustPage(storyID, pageID int64, feedback string) error {
 	})
 }
 
-// ---------- step 4: art ----------
+// ---------- step 6: the comic ----------
 
 // RenderAll draws every page that has no current art.
 func (r *Runner) RenderAll(storyID int64) error {
@@ -893,6 +928,10 @@ func (r *Runner) RenderAll(storyID int64) error {
 		if err != nil {
 			return err
 		}
+		world, art, err := r.worldArt(ctx, storyID)
+		if err != nil {
+			return err
+		}
 		var mu sync.Mutex
 		done := 0
 		var firstErr error
@@ -902,7 +941,7 @@ func (r *Runner) RenderAll(storyID int64) error {
 			wg.Add(1)
 			go func(p *store.Page) {
 				defer wg.Done()
-				err := r.drawPage(ctx, story, chars, refs, p, "")
+				err := r.drawPage(ctx, story, chars, refs, world, art, p, "")
 				mu.Lock()
 				done++
 				if err != nil && firstErr == nil {
@@ -941,7 +980,11 @@ func (r *Runner) RenderPage(storyID, pageID int64, feedback string) error {
 		if err != nil {
 			return err
 		}
-		return r.drawPage(ctx, story, chars, refs, page, feedback)
+		world, art, err := r.worldArt(ctx, storyID)
+		if err != nil {
+			return err
+		}
+		return r.drawPage(ctx, story, chars, refs, world, art, page, feedback)
 	})
 }
 
@@ -961,7 +1004,7 @@ func (r *Runner) sheets(ctx context.Context, chars []*store.Character) (map[stri
 	return refs, nil
 }
 
-func (r *Runner) drawPage(ctx context.Context, story *store.Story, chars []*store.Character, refs map[string][]byte, p *store.Page, feedback string) error {
+func (r *Runner) drawPage(ctx context.Context, story *store.Story, chars []*store.Character, refs map[string][]byte, world []*store.Element, art map[int64][]byte, p *store.Page, feedback string) error {
 	r.imgSem <- struct{}{}
 	defer func() { <-r.imgSem }()
 	_ = r.st.SetPageImage(ctx, p.ID, p.Image, store.ImageGenerating, "")
@@ -980,7 +1023,14 @@ func (r *Runner) drawPage(ctx context.Context, story *store.Story, chars []*stor
 	for _, c := range cast {
 		images = append(images, refs[strings.ToLower(c.Name)])
 	}
-	png, err := r.aiFor(story, models.Pages).EditImage(ctx, pipeline.PagePrompt(story, cast, p, feedback), pipeline.PageRefs(cast, images), pipeline.PageSize)
+	// The concept art of the page's places and props fills what the cast
+	// leaves of the reference images.
+	shown := pipeline.PageWorld(world, p, min(pipeline.MaxWorldRefs, pipeline.MaxRefs-len(cast)))
+	var drawings [][]byte
+	for _, e := range shown {
+		drawings = append(drawings, art[e.ID])
+	}
+	png, err := r.aiFor(story, models.Pages).EditImage(ctx, pipeline.PagePrompt(story, cast, shown, p, feedback), pipeline.PageRefs(cast, images, shown, drawings), pipeline.PageSize)
 	if err != nil {
 		_ = r.st.SetPageImage(ctx, p.ID, p.Image, store.ImageError, err.Error())
 		return err

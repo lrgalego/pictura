@@ -293,10 +293,19 @@ func (s *server) lookView(r *http.Request, st *store.Story) (views.LookView, err
 	if err != nil {
 		return views.LookView{}, err
 	}
-	v := views.LookView{Story: st, Style: st.Style, Started: jobs.SheetsStarted(chars), Pick: s.modelPick(st, models.Sheets)}
+	world, err := s.st.Elements(r.Context(), st.ID)
+	if err != nil {
+		return views.LookView{}, err
+	}
+	v := views.LookView{Story: st, Style: st.Style, Started: jobs.SheetsStarted(chars) || jobs.WorldStarted(world), Pick: s.modelPick(st, models.Sheets)}
 	for _, c := range chars {
 		if c.SheetImage != "" {
 			v.Sheets++
+		}
+	}
+	for _, e := range world {
+		if e.ArtImage != "" {
+			v.Art++
 		}
 	}
 	for _, p := range pages {
@@ -334,7 +343,7 @@ func (s *server) updateLook(w http.ResponseWriter, r *http.Request) {
 	}
 	style := pipeline.StyleBySlug(field(r, "style")).Slug
 	changed := style != st.Style
-	if changed && (v.Started || v.Sheets > 0) && s.jobs.Working(st.ID) {
+	if changed && (v.Started || v.Sheets > 0 || v.Art > 0) && s.jobs.Working(st.ID) {
 		v.Style, v.Error = style, "The cast is still being drawn. Wait for it to finish before changing the look."
 		w.WriteHeader(http.StatusConflict)
 		render(w, r, views.Shell(s.shell(r, st.Title), views.StoryShell(st, store.StepLook, views.LookStep(v))))
@@ -350,7 +359,7 @@ func (s *server) updateLook(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if changed && v.Sheets > 0 {
+	if changed && (v.Sheets > 0 || v.Art > 0) {
 		if err := s.jobs.Restyle(st.ID, true); err != nil {
 			s.fail(w, r, err)
 			return
@@ -385,13 +394,14 @@ func (s *server) charactersView(r *http.Request, st *store.Story) (views.Charact
 		return views.CharactersView{}, err
 	}
 	pages, _ := s.st.Pages(r.Context(), st.ID)
+	world, _ := s.st.Elements(r.Context(), st.ID)
 	lib, err := s.st.Library(r.Context(), st.UserID)
 	if err != nil {
 		return views.CharactersView{}, err
 	}
 	return views.CharactersView{
 		Pick:  s.modelPick(st, models.Sheets),
-		Story: st, Characters: chars, Job: job, CharJobs: charJobs, Working: working, Refs: refs, PageCount: len(pages),
+		Story: st, Characters: chars, Job: job, CharJobs: charJobs, Working: working, Refs: refs, PageCount: len(pages), WorldCount: len(world),
 		AllReady:    jobs.AllReady(chars),
 		Suggestions: suggestions(lib, chars, st.ID),
 		Lineage:     lineage(lib, chars, st.ID),
@@ -475,11 +485,18 @@ func (s *server) castApprove(w http.ResponseWriter, r *http.Request) {
 		s.answerCharacters(w, r, st, toast(components.ToastDefault, "Draw the sheets first", "Pages are drawn from the character sheets, so every character needs one."))
 		return
 	}
-	if err := s.jobs.Breakdown(st.ID); err != nil {
-		s.answerCharacters(w, r, st, errorToast(err))
+	if err := s.st.SetStep(r.Context(), st.ID, store.StepWorld); err != nil {
+		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, fmt.Sprintf("/stories/%d/pages", st.ID))
+	// The first visit finds the places and props; later ones keep them.
+	if world, _ := s.st.Elements(r.Context(), st.ID); len(world) == 0 {
+		if err := s.jobs.DesignWorld(st.ID); err != nil {
+			s.answerCharacters(w, r, st, errorToast(err))
+			return
+		}
+	}
+	redirect(w, r, fmt.Sprintf("/stories/%d/world", st.ID))
 }
 
 func (s *server) character(w http.ResponseWriter, r *http.Request, st *store.Story) (*store.Character, bool) {
@@ -1087,7 +1104,7 @@ func (s *server) characterLinkPanel(w http.ResponseWriter, r *http.Request) {
 	layout.Fragments(w, r, views.LinkPanel(v, registry(lib, st.ID)))
 }
 
-// ---------- step 4: storyboard ----------
+// ---------- step 5: storyboard ----------
 
 func (s *server) pagesView(r *http.Request, st *store.Story) (views.PagesView, error) {
 	pages, err := s.st.Pages(r.Context(), st.ID)
@@ -1251,7 +1268,7 @@ func (s *server) pageAdjust(w http.ResponseWriter, r *http.Request) {
 	s.answerPages(w, r, st, views.CloseModal(), toast(components.ToastSuccess, fmt.Sprintf("Revising page %d", p.Number), ""))
 }
 
-// ---------- step 5: the book ----------
+// ---------- step 6: the book ----------
 
 func (s *server) bookPage(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.story(w, r)

@@ -186,6 +186,37 @@ func TestRenumberSteps(t *testing.T) {
 	}
 }
 
+func TestRenumberStepsForTheWorld(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, "Old", "Old", "hash")
+	ids := map[int]int64{}
+	for _, old := range []int{1, 2, 3, 4, 5} {
+		st, _ := s.CreateStory(ctx, u.ID, "t", "script", "", "comic")
+		_ = s.ResetStep(ctx, st.ID, old)
+		ids[old] = st.ID
+	}
+	// Back to a database with the look step but no world step.
+	if _, err := s.db.Exec(`PRAGMA user_version = 1`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if s, err = Open(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	want := map[int]int{1: StepScript, 2: StepLook, 3: StepCharacters, 4: StepPages, 5: StepBook}
+	for old, id := range ids {
+		if got, _ := s.Story(ctx, id); got.Step != want[old] {
+			t.Fatalf("old step %d: got %d, want %d", old, got.Step, want[old])
+		}
+	}
+}
+
 func TestStoriesLifecycle(t *testing.T) {
 	s, _ := open(t)
 	ctx := context.Background()
@@ -702,5 +733,53 @@ func TestLinesCarrySoundsAndTags(t *testing.T) {
 	}
 	if pg, _ := s.Page(ctx, p.ID); pg.ReadingVersion != 2 || pg.ReadingImage != "art.png" {
 		t.Fatalf("page: %+v", pg)
+	}
+}
+
+func TestElements(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	_, st := seed(t, s)
+	prop := &Element{StoryID: st.ID, Position: 0, Kind: KindProp, Name: "the pie", Visual: "golden"}
+	place := &Element{StoryID: st.ID, Position: 1, Kind: KindPlace, Name: "the kitchen"}
+	for _, e := range []*Element{prop, place} {
+		if err := s.InsertElement(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Elements(ctx, st.ID)
+	if err != nil || len(got) != 2 || got[0].Name != "the kitchen" || got[1].ArtStatus != ImagePending || !got[0].IsPlace() {
+		t.Fatalf("places first, pending: %+v %v", got, err)
+	}
+	prop.Name, prop.Layout = "Grandma's pie", "two hands wide"
+	if err := s.UpdateElement(ctx, prop); err != nil {
+		t.Fatal(err)
+	}
+	art, _ := s.SaveImage(ctx, st.ID, "png", testPNG(40, 30))
+	if err := s.SetElementArt(ctx, prop.ID, art, ImageReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	e, err := s.Element(ctx, prop.ID)
+	if err != nil || e.Name != "Grandma's pie" || e.Layout != "two hands wide" || e.ArtImage != art || e.ArtStatus != ImageReady {
+		t.Fatalf("updated: %+v %v", e, err)
+	}
+	// Concept art in use is never swept; once its element goes, it is.
+	if n, _ := s.Sweep(ctx, st.ID); n != 0 {
+		t.Fatalf("swept art in use: %d", n)
+	}
+	if err := s.DeleteElement(ctx, prop.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Element(ctx, prop.ID); err != ErrNotFound {
+		t.Fatalf("deleted: %v", err)
+	}
+	if n, _ := s.Sweep(ctx, st.ID); n != 1 {
+		t.Fatalf("orphaned art swept: %d", n)
+	}
+	if err := s.DeleteElements(ctx, st.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Elements(ctx, st.ID); len(got) != 0 {
+		t.Fatalf("all gone: %+v", got)
 	}
 }

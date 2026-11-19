@@ -1,0 +1,305 @@
+package views
+
+import (
+	"fmt"
+
+	"github.com/lrgalego/htmx-ds/components"
+	"github.com/lrgalego/pictura/internal/store"
+)
+
+// WorldView is everything the world step renders: the story's places and
+// props, each with its concept art.
+type WorldView struct {
+	Story     *store.Story
+	Elements  []*store.Element
+	Job       *store.Job // latest story-level job
+	Working   bool       // anything is running: keep polling
+	Ready     bool       // every place and prop is drawn: storyboarding may start
+	PageCount int
+	Pick      ModelPick // who draws the concept art
+}
+
+func (v WorldView) kind(kind string) []*store.Element {
+	var out []*store.Element
+	for _, e := range v.Elements {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (v WorldView) drawn() int {
+	n := 0
+	for _, e := range v.Elements {
+		if e.ArtStatus == store.ImageReady {
+			n++
+		}
+	}
+	return n
+}
+
+func elementURL(st *store.Story, e *store.Element) string {
+	return fmt.Sprintf("%s/world/%d", base(st), e.ID)
+}
+
+// artStatus is the one-word state of a place or prop's concept art.
+func artStatus(e *store.Element) (label string, tone components.BadgeVariant) {
+	switch e.ArtStatus {
+	case store.ImageReady:
+		return "Art ready", components.BadgeSuccess
+	case store.ImageGenerating:
+		return "Drawing", components.BadgeDefault
+	case store.ImageError:
+		return "Art failed", components.BadgeDestructive
+	}
+	return "Not drawn yet", components.BadgeOutline
+}
+
+templ WorldStep(v WorldView) {
+	@WorldPanel(v)
+}
+
+templ WorldPanel(v WorldView) {
+	@stepPanel(base(v.Story)+"/world/panel", v.Working) {
+		if v.Job != nil {
+			@JobBar(v.Story, v.Job, store.StepWorld)
+		}
+		if len(v.Elements) == 0 && v.Job.Active() {
+			@skeletonWorld()
+		}
+		if len(v.Elements) == 0 && !v.Job.Active() {
+			<div class="empty-wrap">
+				@components.EmptyState(components.EmptyStateProps{Title: "No places or props yet", Description: "The designer finds where the story happens and the objects it turns on, and draws concept art for each, so they look the same on every page."}) {
+					<div class="world-empty__actions">
+						@components.Button(components.ButtonProps{Attrs: templ.Attributes{"hx-post": base(v.Story) + "/world/read", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
+							@components.IconSearch()
+							Find the places and props
+						}
+						<form hx-post={ base(v.Story) + "/world/approve" } hx-target="#step-panel" hx-swap="outerMorph">
+							@components.Button(components.ButtonProps{Type: "submit", Variant: components.ButtonGhost}) {
+								Storyboard without them
+							}
+						</form>
+					</div>
+				}
+			</div>
+		} else if len(v.Elements) > 0 {
+			@worldToolbar(v, false)
+			if places := v.kind(store.KindPlace); len(places) > 0 {
+				@worldSection(v, "Places", "Where the story happens. Each keeps its layout — doors, windows, what is inside and outside — on every page.", places)
+			}
+			if props := v.kind(store.KindProp); len(props) > 0 {
+				@worldSection(v, "Props", "The objects the story turns on. Each keeps its shape, size and colors from page to page.", props)
+			}
+			@worldToolbar(v, true)
+		}
+	}
+}
+
+templ worldToolbar(v WorldView, bottom bool) {
+	<div class={ "toolbar", templ.KV("toolbar--bottom", bottom) }>
+		if !bottom {
+			if v.Ready {
+				<span class="note">{ plural(len(v.Elements), "place or prop", "places and props") + " designed. Open the art to check it; change what is off, then storyboard." }</span>
+			} else {
+				<span class="note">{ plural(len(v.Elements), "place or prop", "places and props") + " found in the script. Fix the descriptions or remove what doesn't matter, then draw the concept art." }</span>
+			}
+		}
+		<span class="toolbar__spacer"></span>
+		if !bottom {
+			@ModelPicker(v.Pick)
+		}
+		@components.DialogTrigger(components.DialogTriggerProps{URL: base(v.Story) + "/world/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Disabled: v.Job.Active()}}) {
+			@components.IconPencil()
+			Adjust the world
+		}
+		if v.Ready {
+			if v.PageCount > 0 {
+				@components.LinkButton(components.LinkButtonProps{Href: base(v.Story) + "/pages", Variant: components.ButtonGhost}) {
+					Keep the storyboard
+				}
+			}
+			<form hx-post={ base(v.Story) + "/world/approve" } hx-target="#step-panel" hx-swap="outerMorph">
+				@components.Button(components.ButtonProps{Type: "submit", Disabled: v.Job.Active()}) {
+					if v.PageCount > 0 {
+						Storyboard again
+					} else {
+						Storyboard the pages
+					}
+					@components.IconArrowRight()
+				}
+			</form>
+		} else {
+			@components.Button(components.ButtonProps{Disabled: v.Job.Active(), Attrs: templ.Attributes{"hx-post": base(v.Story) + "/world/draw", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
+				@components.IconPalette()
+				if v.drawn() > 0 {
+					Draw the remaining art
+				} else {
+					Draw the concept art
+				}
+			}
+		}
+	</div>
+}
+
+templ worldSection(v WorldView, title, blurb string, items []*store.Element) {
+	<section class="world-section">
+		<div class="world-section__head">
+			<h2>{ title }</h2>
+			<p class="note">{ blurb }</p>
+		</div>
+		<div class="world-grid" data-motion-stagger="pop">
+			for _, e := range items {
+				@worldCard(v, e)
+			}
+		</div>
+	</section>
+}
+
+templ worldCard(v WorldView, e *store.Element) {
+	{{ busy := v.Job.Active() }}
+	<article class={ "panel panel--soft world-card", templ.KV("world-card--working", e.ArtStatus == store.ImageGenerating) } id={ fmt.Sprintf("element-%d", e.ID) }>
+		<div class="world-card__art">
+			if e.ArtStatus == store.ImageGenerating {
+				<div class="char__state char__state--busy">
+					<div>
+						@components.Spinner("lg", "")
+						<div class="char__state-msg">Drawing</div>
+					</div>
+				</div>
+			} else if e.ArtImage != "" {
+				<button type="button" class="char__sheet-btn" id={ "art-" + e.ArtImage } hx-get={ elementURL(v.Story, e) + "/view" } hx-target="#modal-root" aria-label={ "Open the art of " + e.Name }>
+					<img src={ "/media/t/" + e.ArtImage } alt={ "Concept art of " + e.Name } loading="lazy" data-motion-enter="pop"/>
+				</button>
+			} else if e.ArtStatus == store.ImageError {
+				<div class="char__state">
+					<div>
+						@components.IconAlertTriangle()
+						<div class="char__state-msg">The art failed</div>
+						<div class="note">{ e.ArtError }</div>
+					</div>
+				</div>
+			} else {
+				<div class="char__state char__state--idle char__sheet--idle">
+					<span class="char__state-msg">Not drawn yet</span>
+					<span class="note">Drawn with the rest, or on its own below.</span>
+				</div>
+			}
+		</div>
+		<div class="world-card__body">
+			<div class="world-card__head">
+				<h3 class="world-card__name">{ e.Name }</h3>
+				{{ label, tone := artStatus(e) }}
+				@components.Badge(tone, nil) {
+					{ label }
+				}
+			</div>
+			if e.ArtStatus == store.ImageError && e.ArtImage != "" {
+				<p class="note world-card__error">{ "The last drawing failed: " + e.ArtError }</p>
+			}
+			<p class="char__desc">{ e.Visual }</p>
+			if e.Layout != "" {
+				<details class="world-card__layout">
+					<summary>
+						if e.IsPlace() {
+							Layout
+						} else {
+							Size and use
+						}
+					</summary>
+					<p>{ e.Layout }</p>
+				</details>
+			}
+			<div class="world-card__actions">
+				@components.DialogTrigger(components.DialogTriggerProps{URL: elementURL(v.Story, e) + "/adjust", Button: components.ButtonProps{Variant: components.ButtonOutline, Size: components.SizeSm, Disabled: busy}}) {
+					@components.IconPencil()
+					Change
+				}
+				@components.DialogTrigger(components.DialogTriggerProps{URL: elementURL(v.Story, e) + "/edit", Button: components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy}}) {
+					Edit
+				}
+				@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.SizeSm, Disabled: busy, Attrs: templ.Attributes{"hx-post": elementURL(v.Story, e) + "/redraw", "hx-target": "#step-panel", "hx-swap": "outerMorph"}}) {
+					@components.IconRefreshCw()
+					if e.ArtStatus == store.ImagePending {
+						Draw
+					} else {
+						Redraw
+					}
+				}
+				@components.DialogTrigger(components.DialogTriggerProps{URL: elementURL(v.Story, e) + "/delete", Button: components.ButtonProps{Variant: components.ButtonDestructiveGhost, Size: components.SizeSm, Disabled: busy, Attrs: templ.Attributes{"aria-label": "Remove " + e.Name}}}) {
+					@components.IconTrash()
+				}
+			</div>
+		</div>
+	</article>
+}
+
+templ skeletonWorld() {
+	<div class="skel" aria-hidden="true">
+		for range 3 {
+			<div class="panel skel__card">
+				<div class="skel__art"></div>
+				<div class="skel__body">
+					@components.Skeleton("")
+					@components.Skeleton("")
+					@components.Skeleton("")
+				</div>
+			</div>
+		}
+	</div>
+}
+
+// ElementEditDialog edits a place or prop's words by hand.
+templ ElementEditDialog(st *store.Story, e *store.Element) {
+	@components.Dialog(components.DialogProps{Title: "Edit " + e.Name, Description: "The concept art and every page are drawn from these words."}) {
+		<form class="form" hx-post={ elementURL(st, e) + "/edit" } hx-target="#step-panel" hx-swap="outerMorph">
+			@ElementNameField(e.Name, "", false)
+			@components.Field(components.FieldProps{ID: "f-el-visual", Label: "Looks", For: "el-visual"}) {
+				@components.Textarea(components.TextareaProps{ID: "el-visual", Name: "visual", Value: e.Visual, Rows: 4})
+			}
+			@components.Field(components.FieldProps{ID: "f-el-layout", Label: layoutLabel(e), For: "el-layout"}) {
+				@components.Textarea(components.TextareaProps{ID: "el-layout", Name: "layout", Value: e.Layout, Rows: 3})
+			}
+			if e.ArtStatus != store.ImagePending {
+				<label class="details__redraw">
+					@components.Checkbox(components.CheckboxProps{ID: "el-redraw", Name: "redraw", Value: "1", Checked: true})
+					<span>Redraw the art if the looks or layout changed</span>
+				</label>
+			}
+			<div class="dialog-actions">
+				@cancelButton("Cancel")
+				@components.Button(components.ButtonProps{Type: "submit"}) {
+					Save
+				}
+			</div>
+		</form>
+	}
+}
+
+templ ElementNameField(value, err string, oob bool) {
+	@components.Field(components.FieldProps{ID: "f-el-name", Label: "Name", For: "el-name", Error: err, OOB: oob}) {
+		@components.Input(components.InputProps{ID: "el-name", Name: "name", Value: value, Invalid: err != "", Attrs: templ.Attributes{"autofocus": true}})
+	}
+}
+
+func layoutLabel(e *store.Element) string {
+	if e.IsPlace() {
+		return "Layout"
+	}
+	return "Size and use"
+}
+
+// ElementDeleteDialog asks before a place or prop goes.
+templ ElementDeleteDialog(st *store.Story, e *store.Element) {
+	@components.Dialog(components.DialogProps{Title: "Remove " + e.Name + "?", Description: "Its concept art goes with it, and pages stop drawing from it. Pages drawn already keep their look until they are redrawn."}) {
+		<form hx-post={ elementURL(st, e) + "/delete" } hx-target="#step-panel" hx-swap="outerMorph">
+			<div class="dialog-actions">
+				@cancelButton("Keep it")
+				@components.Button(components.ButtonProps{Type: "submit", Variant: components.ButtonDestructive}) {
+					Remove
+				}
+			</div>
+		</form>
+	}
+}
