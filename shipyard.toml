@@ -22,7 +22,7 @@ memory     = "1g"
 private_modules = ["github.com/lrgalego"]
 
 [ui]
-htmx_ds = "v0.9.1"
+htmx_ds = "v0.15.1"
 
 [gate]
 coverage_min = 85

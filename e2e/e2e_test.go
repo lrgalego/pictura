@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 
 	"github.com/lrgalego/pictura/internal/jobs"
 	"github.com/lrgalego/pictura/internal/pipeline"
